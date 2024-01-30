@@ -97,6 +97,33 @@ def predict(
     return boxes, logits.max(dim=1)[0], phrases
 
 
+from .box_ops import box_iou
+
+def train(model,
+        image: torch.Tensor,
+        caption: list,
+        box_threshold: float,
+        text_threshold: float,
+        device: str = "cuda",
+        remove_combined: bool = False):
+
+    # Currently supporting 
+    
+    caption = preprocess_caption(caption=caption)
+    
+    model = model.to(device)
+    image = image.to(device)
+    
+    outputs = model(image[None], captions=[caption])
+
+    h, w, _ = image_source.shape
+    boxes = boxes * torch.Tensor([w, h, w, h])
+    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+
+
+
+
+
 def annotate(image_source: np.ndarray, boxes: torch.Tensor, logits: torch.Tensor, phrases: List[str]) -> np.ndarray:
     h, w, _ = image_source.shape
     boxes = boxes * torch.Tensor([w, h, w, h])

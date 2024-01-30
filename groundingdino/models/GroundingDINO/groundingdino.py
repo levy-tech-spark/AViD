@@ -245,9 +245,7 @@ class GroundingDINO(nn.Module):
             captions = [t["caption"] for t in targets]
 
         # encoder texts
-        tokenized = self.tokenizer(captions, padding="longest", return_tensors="pt").to(
-            samples.device
-        )
+        tokenized = self.tokenizer(captions, padding="longest", return_tensors="pt").to(samples.device)
         (
             text_self_attention_masks,
             position_ids,
@@ -374,10 +372,9 @@ class GroundingDINO(nn.Module):
             for a, b in zip(outputs_class[:-1], outputs_coord[:-1])
         ]
 
-
 @MODULE_BUILD_FUNCS.registe_with_name(module_name="groundingdino")
 def build_groundingdino(args):
-
+    # Image backbone
     backbone = build_backbone(args)
     transformer = build_transformer(args)
 
