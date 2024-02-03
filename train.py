@@ -27,23 +27,22 @@ with open(ann_file) as file_obj:
         ann_Dict[img_n]['boxes'].append([x1,y1,x2,y2])
         ann_Dict[img_n]['caption'].append(label)
 
-print(ann_Dict)
-exit()
 
-
-IMAGE_PATH = "test_pepper.jpg"
-TEXT_PROMPT = "fruit.stem"
+#IMAGE_PATH = "test_pepper.jpg"
+#TEXT_PROMPT = "fruit.stem"
 BOX_TRESHOLD = 0.1
 TEXT_TRESHOLD = 0.2
 
-image_source, image = load_image(IMAGE_PATH)
+for IMAGE_PATH,vals in ann_Dict.items():
+    
+    image_source, image = load_image(IMAGE_PATH)
 
-boxes, logits, phrases = train(
-    model=model,
-    image_source=image_source,
-    image=image,
-    caption=TEXT_PROMPT,
-    box_target=box_target,
-    box_threshold=BOX_TRESHOLD,
-    text_threshold=TEXT_TRESHOLD
-)
+    boxes, logits, phrases = train(
+        model=model,
+        image_source=image_source,
+        image=image,
+        caption=TEXT_PROMPT,
+        box_target=box_target,
+        box_threshold=BOX_TRESHOLD,
+        text_threshold=TEXT_TRESHOLD
+    )
