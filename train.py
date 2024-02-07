@@ -34,8 +34,11 @@ BOX_TRESHOLD = 0.1
 TEXT_TRESHOLD = 0.2
 
 for IMAGE_PATH,vals in ann_Dict.items():
-    
+
     image_source, image = load_image(IMAGE_PATH)
+    print(image_source.shape)
+    print(image.shape)
+    exit()
 
     boxes, logits, phrases = train(
         model=model,
