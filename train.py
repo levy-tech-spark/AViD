@@ -92,17 +92,17 @@ def train():
         # Not ideal use batching from pytorch data loader for multiprocessing but good enough for small dataset
         for i,bx in enumerate(vals['boxes']):
             caption=vals['captions'][i]
-
-            os.makedirs("vis_Dataset",exist_ok=True)
-            draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
-            continue
+            
+            #os.makedirs("vis_Dataset",exist_ok=True)
+            #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
+            #continue
 
             boxes, logits, phrases = train(
                 model=model,
                 image_source=image_source,
                 image=image,
-                caption=TEXT_PROMPT,
-                box_target=box_target,
+                caption=caption,
+                box_target=bx,
                 box_threshold=BOX_TRESHOLD,
                 text_threshold=TEXT_TRESHOLD
             )
