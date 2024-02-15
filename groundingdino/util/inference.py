@@ -100,8 +100,10 @@ def predict(
 from .box_ops import box_iou
 
 def train(model,
+        image_source,
         image: torch.Tensor,
-        caption: list,
+        caption: str,
+        box_target: list,
         box_threshold: float,
         text_threshold: float,
         device: str = "cuda",
