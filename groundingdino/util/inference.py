@@ -99,7 +99,7 @@ def predict(
 
 from .box_ops import box_iou
 
-def train(model,
+def train_image(model,
         image_source,
         image: torch.Tensor,
         caption: str,
@@ -112,6 +112,7 @@ def train(model,
     # Currently supporting 
     
     caption = preprocess_caption(caption=caption)
+    print(caption)
     
     model = model.to(device)
     image = image.to(device)

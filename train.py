@@ -1,4 +1,4 @@
-from groundingdino.util.inference import load_model, load_image, predict,train, annotate
+from groundingdino.util.inference import load_model, load_image, predict,train_image, annotate
 import cv2
 import os
 import json
@@ -11,6 +11,9 @@ model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/g
 # Dataset paths
 images_files=sorted(os.listdir("multimodal-data/images"))
 ann_file="multimodal-data/annotation/annotation.csv"
+
+BOX_TRESHOLD = 0.1
+TEXT_TRESHOLD = 0.2
 
 
 def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255), thickness=2, font_scale=0.5):
@@ -90,22 +93,23 @@ def train():
     for idx, (IMAGE_PATH,vals) in enumerate(ann_Dict.items()):
         image_source, image = load_image(IMAGE_PATH)
         # Not ideal use batching from pytorch data loader for multiprocessing but good enough for small dataset
-        for i,bx in enumerate(vals['boxes']):
-            caption=vals['captions'][i]
-            
-            #os.makedirs("vis_Dataset",exist_ok=True)
-            #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
-            #continue
+        #for i,bx in enumerate(vals['boxes']):
+        bxs=vals['boxes']
+        captions=vals['captions']
 
-            boxes, logits, phrases = train(
-                model=model,
-                image_source=image_source,
-                image=image,
-                caption=caption,
-                box_target=bx,
-                box_threshold=BOX_TRESHOLD,
-                text_threshold=TEXT_TRESHOLD
-            )
+        #os.makedirs("vis_Dataset",exist_ok=True)
+        #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
+        #continue
+
+        boxes, logits, phrases = train_image(
+            model=model,
+            image_source=image_source,
+            image=image,
+            caption=captions,
+            box_target=bxs,
+            box_threshold=BOX_TRESHOLD,
+            text_threshold=TEXT_TRESHOLD
+        )
 
 if __name__=="__main__":
     train()
