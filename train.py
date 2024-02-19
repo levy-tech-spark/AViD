@@ -96,6 +96,13 @@ def train():
         #for i,bx in enumerate(vals['boxes']):
         bxs=vals['boxes']
         captions=vals['captions']
+        if len(captions)>1:
+            captions=captions[0]+".".join(captions[1:])
+        else:
+            captions=captions[0]
+        print(captions)
+        break
+
 
         #os.makedirs("vis_Dataset",exist_ok=True)
         #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
