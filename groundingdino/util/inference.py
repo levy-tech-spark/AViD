@@ -112,16 +112,22 @@ def train_image(model,
     # Currently supporting 
     
     caption = preprocess_caption(caption=caption)
-    print(caption)
+
+    print(f"Tokanized caption is {caption}")
     
     model = model.to(device)
     image = image.to(device)
     
     outputs = model(image[None], captions=[caption])
 
+    logits = outputs["pred_logits"][0]  # prediction_logits.shape = (nq, 256)
+    boxes = outputs["pred_boxes"][0]  # prediction_boxes.shape = (nq, 4)
+
     h, w, _ = image_source.shape
-    boxes = boxes * torch.Tensor([w, h, w, h])
-    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+    boxes = boxes * torch.Tensor([w, h, w, h]).cuda()
+    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy")
+
+    print(f"XYXY box shape is {xyxy.shape}")
 
 
 
