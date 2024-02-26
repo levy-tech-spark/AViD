@@ -6,6 +6,8 @@ import supervision as sv
 import torch
 from PIL import Image
 from torchvision.ops import box_convert
+from torchvision.ops import box_iou
+import torch.nn.functional as F
 import bisect
 
 import groundingdino.datasets.transforms as T
@@ -97,8 +99,6 @@ def predict(
     return boxes, logits.max(dim=1)[0], phrases
 
 
-from .box_ops import box_iou
-
 def train_image(model,
         image_source,
         image: torch.Tensor,
@@ -112,8 +112,11 @@ def train_image(model,
     # Currently supporting 
     
     caption = preprocess_caption(caption=caption)
+    tokenizer = model.tokenizer
+    tokenized = tokenizer(caption)
 
     print(f"Tokanized caption is {caption}")
+    print(f"Tokanizer tokanized 2 is {tokenized}")
     
     model = model.to(device)
     image = image.to(device)
@@ -125,9 +128,21 @@ def train_image(model,
 
     h, w, _ = image_source.shape
     boxes = boxes * torch.Tensor([w, h, w, h]).cuda()
-    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy")
+    box_predicted = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy")
+    box_target = torch.tensor(box_target).cuda()
+    ious=box_iou(box_target,box_predicted)
+    maxvals,maxidx=torch.max(ious,dim=1)
+    selected_preds = box_predicted.gather(0, maxidx.unsqueeze(-1).repeat(1, box_predicted.size(1)))
 
-    print(f"XYXY box shape is {xyxy.shape}")
+    regression_loss = F.smooth_l1_loss(box_target, selected_preds)
+    # IoU-based Loss
+    iou_loss = 1.0 - maxvals.mean()
+
+    # Combine the two losses
+    lambda_factor = 1.0  
+    reg_loss = iou_loss + lambda_factor * regression_loss
+    print(f"Reg loss is {reg_loss}")
+
 
 
 
