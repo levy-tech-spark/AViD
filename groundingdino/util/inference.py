@@ -102,7 +102,7 @@ def predict(
 def train_image(model,
         image_source,
         image: torch.Tensor,
-        caption: str,
+        caption_objects: list,
         box_target: list,
         box_threshold: float,
         text_threshold: float,
@@ -110,13 +110,25 @@ def train_image(model,
         remove_combined: bool = False):
 
     # Currently supporting 
-    
-    caption = preprocess_caption(caption=caption)
     tokenizer = model.tokenizer
+
+    caption= list(set(caption_objects))
+    
+    objects_token=[tokenizer(item)['input_ids'] for item in caption]
+
+    print(f"KK debug is {tokenizer.decode(objects_token[1])}")
+
+    if len(caption)>1:
+            caption=caption[0]+"."+(".".join(caption[1:]))
+    else:
+            caption=caption[0]
+
+    caption = preprocess_caption(caption=caption)
     tokenized = tokenizer(caption)
 
-    print(f"Tokanized caption is {caption}")
-    print(f"Tokanizer tokanized 2 is {tokenized}")
+    print(f"Preprocessed caption is {caption}")
+    print(f"Tokanized Caption is {tokenized}")
+    print(f"Objects tokerns are {objects_token}")
     
     model = model.to(device)
     image = image.to(device)

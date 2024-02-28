@@ -97,11 +97,6 @@ def train():
         bxs=vals['boxes']
         captions=vals['captions']
         print(f"Length of caption {len(captions)}")
-        if len(captions)>1:
-            captions=captions[0]+"."+(".".join(captions[1:]))
-        else:
-            captions=captions[0]
-
         #os.makedirs("vis_Dataset",exist_ok=True)
         #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
         #continue
@@ -110,7 +105,7 @@ def train():
             model=model,
             image_source=image_source,
             image=image,
-            caption=captions,
+            caption_objects=captions,
             box_target=bxs,
             box_threshold=BOX_TRESHOLD,
             text_threshold=TEXT_TRESHOLD
