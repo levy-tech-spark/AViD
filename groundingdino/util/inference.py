@@ -113,10 +113,8 @@ def train_image(model,
     tokenizer = model.tokenizer
 
     caption= list(set(caption_objects))
-    
-    objects_token=[tokenizer(item)['input_ids'] for item in caption]
-
-    print(f"KK debug is {tokenizer.decode(objects_token[1])}")
+    # Added . for easy matching later on
+    objects_token={item:tokenizer(item+".")['input_ids'] for item in caption}
 
     if len(caption)>1:
             caption=caption[0]+"."+(".".join(caption[1:]))
@@ -126,15 +124,38 @@ def train_image(model,
     caption = preprocess_caption(caption=caption)
     tokenized = tokenizer(caption)
 
+    # Get the positions of objects_token in the tokenized so we can maximize logits of these positions
+    object_positions_dict = {}
+    print(tokenized['input_ids'])
+    print(objects_token)
+
+    for obj_name, obj_token in objects_token.items():
+        start_pos = 0  # Initial position can start from 0
+        while start_pos <= len(tokenized['input_ids']) - len(obj_token) + 1:  # Adjust the end condition to prevent overrunning
+            # Check if the current position's token matches the inner section of the object token
+            print(f"Comparing {tokenized['input_ids'][start_pos:start_pos+len(obj_token)-2]} and {obj_token[1:-1]}")
+            if tokenized['input_ids'][start_pos:start_pos+len(obj_token)-2] == obj_token[1:-1]:
+                # Store the range in the dictionary (not inclusive of the last element)
+                object_positions_dict[obj_name] = [start_pos, start_pos+len(obj_token)-2]
+                break  # Break out of the loop once the match is found
+            start_pos += 1
+
+    
+    print(object_positions_dict)
+    
+
+    # Get the positions of objects_token in the tokanized so we can maximize logits of these positions
+
     print(f"Preprocessed caption is {caption}")
-    print(f"Tokanized Caption is {tokenized}")
-    print(f"Objects tokerns are {objects_token}")
+    print(f"Tokanizer decoded Caption is {tokenizer.decode(tokenized['input_ids'])}")
+    return
+    #print(f"Tokanized Caption is {tokenized}")
+    #print(f"Objects tokerns are {objects_token}")
     
     model = model.to(device)
     image = image.to(device)
     
     outputs = model(image[None], captions=[caption])
-
     logits = outputs["pred_logits"][0]  # prediction_logits.shape = (nq, 256)
     boxes = outputs["pred_boxes"][0]  # prediction_boxes.shape = (nq, 4)
 
