@@ -253,13 +253,8 @@ class GroundingDINO(nn.Module):
         ) = generate_masks_with_special_tokens_and_transfer_map(
             tokenized, self.specical_tokens, self.tokenizer
         )
-        print(f"Tokaznied caption is {tokenized['input_ids']}")
-        decoded=self.tokenizer.decode(tokenized['input_ids'].cpu().numpy().tolist()[0])
-        print(f"Decoded string {decoded}")
-        print(f"Decoded string 2 {self.tokenizer.decode([21877])}")
-        print(f"Decoded string 4 {self.tokenizer.decode([27584])}")
-        print(f"Decoded string 4 {self.tokenizer.decode([14321])}")
-        print("kkk")
+        #print(f"Tokaznied caption is {tokenized['input_ids']}")
+        #decoded=self.tokenizer.decode(tokenized['input_ids'].cpu().numpy().tolist()[0])
 
         if text_self_attention_masks.shape[1] > self.max_text_len:
             text_self_attention_masks = text_self_attention_masks[

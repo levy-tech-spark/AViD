@@ -1,9 +1,11 @@
-from groundingdino.util.inference import load_model, load_image, predict,train_image, annotate
+from groundingdino.util.train import load_model, load_image,train_image, annotate
 import cv2
 import os
 import json
 import csv
+import torch
 from collections import defaultdict
+import torch.optim as optim
 
 # Model
 model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth")
@@ -11,10 +13,6 @@ model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/g
 # Dataset paths
 images_files=sorted(os.listdir("multimodal-data/images"))
 ann_file="multimodal-data/annotation/annotation.csv"
-
-BOX_TRESHOLD = 0.1
-TEXT_TRESHOLD = 0.2
-
 
 def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255), thickness=2, font_scale=0.5):
     """
@@ -88,28 +86,50 @@ def read_dataset(ann_file):
             ann_Dict[img_n]['captions'].append(label)
     return ann_Dict
 
-def train():
-    ann_Dict=read_dataset(ann_file)
-    for idx, (IMAGE_PATH,vals) in enumerate(ann_Dict.items()):
-        image_source, image = load_image(IMAGE_PATH)
-        # Not ideal use batching from pytorch data loader for multiprocessing but good enough for small dataset
-        #for i,bx in enumerate(vals['boxes']):
-        bxs=vals['boxes']
-        captions=vals['captions']
-        print(f"Length of caption {len(captions)}")
-        #os.makedirs("vis_Dataset",exist_ok=True)
-        #draw_box_with_label(image_source,f"vis_Dataset/{idx}.png" ,bx,caption)
-        #continue
 
-        boxes, logits, phrases = train_image(
-            model=model,
-            image_source=image_source,
-            image=image,
-            caption_objects=captions,
-            box_target=bxs,
-            box_threshold=BOX_TRESHOLD,
-            text_threshold=TEXT_TRESHOLD
-        )
+def train(model, ann_file, epochs=1, save_path='./model_weights.pth'):
+    # Add optimizer
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    
+    # Ensure the model is in training mode
+    model.train()
+
+    for epoch in range(epochs):
+        ann_Dict = read_dataset(ann_file)
+        
+        total_loss = 0  # Track the total loss for this epoch
+        for idx, (IMAGE_PATH, vals) in enumerate(ann_Dict.items()):
+            image_source, image = load_image(IMAGE_PATH)
+            bxs = vals['boxes']
+            captions = vals['captions']
+
+            # Zero the gradients
+            optimizer.zero_grad()
+            
+            # Call the training function for each image and its annotations
+            loss = train_image(
+                model=model,
+                image_source=image_source,
+                image=image,
+                caption_objects=captions,
+                box_target=bxs,
+            )
+            
+            # Backpropagate and optimize
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()  # Accumulate the loss
+            print(f"Processed image {idx+1}/{len(ann_Dict)}, Loss: {loss.item()}")
+
+        # Print the average loss for the epoch
+        print(f"Epoch {epoch+1}/{epochs}, Average Loss: {total_loss / len(ann_Dict)}")
+        
+        # Save the model's weights after each epoch
+        torch.save(model.state_dict(), save_path)
+        print(f"Model weights saved to {save_path}")
+
+
 
 if __name__=="__main__":
-    train()
+    train(model=model, ann_file=ann_file, epochs=500, save_path='./fine_tune_model_weights.pth')

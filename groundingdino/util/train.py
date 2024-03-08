@@ -53,53 +53,6 @@ def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
     return image, image_transformed
 
 
-def predict(
-        model,
-        image: torch.Tensor,
-        caption: str,
-        box_threshold: float,
-        text_threshold: float,
-        device: str = "cuda",
-        remove_combined: bool = False
-) -> Tuple[torch.Tensor, torch.Tensor, List[str]]:
-    caption = preprocess_caption(caption=caption)
-
-    model = model.to(device)
-    image = image.to(device)
-
-    with torch.no_grad():
-        outputs = model(image[None], captions=[caption])
-
-    prediction_logits = outputs["pred_logits"].cpu().sigmoid()[0]  # prediction_logits.shape = (nq, 256)
-    prediction_boxes = outputs["pred_boxes"].cpu()[0]  # prediction_boxes.shape = (nq, 4)
-
-    mask = prediction_logits.max(dim=1)[0] > box_threshold
-    logits = prediction_logits[mask]  # logits.shape = (n, 256)
-    boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
-
-    tokenizer = model.tokenizer
-    tokenized = tokenizer(caption)
-    
-    if remove_combined:
-        sep_idx = [i for i in range(len(tokenized['input_ids'])) if tokenized['input_ids'][i] in [101, 102, 1012]]
-        
-        phrases = []
-        for logit in logits:
-            max_idx = logit.argmax()
-            insert_idx = bisect.bisect_left(sep_idx, max_idx)
-            right_idx = sep_idx[insert_idx]
-            left_idx = sep_idx[insert_idx - 1]
-            phrases.append(get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer, left_idx, right_idx).replace('.', ''))
-    else:
-        phrases = [
-            get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
-            for logit
-            in logits
-        ]
-
-    return boxes, logits.max(dim=1)[0], phrases
-
-
 def train_image(model,
                 image_source,
                 image: torch.Tensor,
@@ -121,10 +74,7 @@ def train_image(model,
     tokenizer = model.tokenizer
     caption = preprocess_caption(caption=".".join(set(caption_objects)))
     tokenized = tokenizer(caption)
-    print(f"Caption is {caption}")
-    print(f"tokanize is {tokenized}")
     object_positions = get_object_positions(tokenized, caption_objects)
-    print(f"Object positions are {object_positions}")
 
     # Move model and input to the device
     model = model.to(device)
@@ -156,15 +106,13 @@ def train_image(model,
         targets_logits_list.append(target)
 
     targets_logits = torch.stack(targets_logits_list, dim=0)
+    cls_loss = F.binary_cross_entropy(selected_logits, targets_logits, reduction='mean')
 
-    print(f"targeet logits shape is {targets_logits.shape}")
-    print(f"targeet logits are {targets_logits[0]}")
-    cls_loss = F.binary_cross_entropy(selected_logits, targets_logits, reduction='sum')
+    print(f"Regression and Classification loss are {reg_loss} and {cls_loss}")
 
     # Total loss
-    total_loss = cls_loss + reg_loss  # delta_factor assumed to be 1.0
-
-    print(f"Total loss is {total_loss}")
+    delta_factor=1.0
+    total_loss = cls_loss + delta_factor*reg_loss  
 
     return total_loss
 

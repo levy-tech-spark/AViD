@@ -34,6 +34,7 @@ groundingdino/models/GroundingDINO/backbone/position_encoding.py
 groundingdino/models/GroundingDINO/backbone/swin_transformer.py
 groundingdino/util/__init__.py
 groundingdino/util/box_ops.py
+groundingdino/util/focal_loss.py
 groundingdino/util/get_tokenlizer.py
 groundingdino/util/inference.py
 groundingdino/util/logger.py
