@@ -133,7 +133,7 @@ def train_image(model,
         start_pos = 0  # Initial position can start from 0
         while start_pos <= len(tokenized['input_ids']) - len(obj_token) + 1:  # Adjust the end condition to prevent overrunning
             # Check if the current position's token matches the inner section of the object token
-            print(f"Comparing {tokenized['input_ids'][start_pos:start_pos+len(obj_token)-2]} and {obj_token[1:-1]}")
+            #print(f"Comparing {tokenized['input_ids'][start_pos:start_pos+len(obj_token)-2]} and {obj_token[1:-1]}")
             if tokenized['input_ids'][start_pos:start_pos+len(obj_token)-2] == obj_token[1:-1]:
                 # Store the range in the dictionary (not inclusive of the last element)
                 object_positions_dict[obj_name] = [start_pos, start_pos+len(obj_token)-2]
@@ -146,9 +146,9 @@ def train_image(model,
 
     # Get the positions of objects_token in the tokanized so we can maximize logits of these positions
 
-    print(f"Preprocessed caption is {caption}")
-    print(f"Tokanizer decoded Caption is {tokenizer.decode(tokenized['input_ids'])}")
-    return
+    #print(f"Preprocessed caption is {caption}")
+    #print(f"Tokanizer decoded Caption is {tokenizer.decode(tokenized['input_ids'])}")
+    #return
     #print(f"Tokanized Caption is {tokenized}")
     #print(f"Objects tokerns are {objects_token}")
     
@@ -158,7 +158,7 @@ def train_image(model,
     outputs = model(image[None], captions=[caption])
     logits = outputs["pred_logits"][0]  # prediction_logits.shape = (nq, 256)
     boxes = outputs["pred_boxes"][0]  # prediction_boxes.shape = (nq, 4)
-
+    # Calculate losses for bounding boxes
     h, w, _ = image_source.shape
     boxes = boxes * torch.Tensor([w, h, w, h]).cuda()
     box_predicted = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy")
@@ -166,16 +166,27 @@ def train_image(model,
     ious=box_iou(box_target,box_predicted)
     maxvals,maxidx=torch.max(ious,dim=1)
     selected_preds = box_predicted.gather(0, maxidx.unsqueeze(-1).repeat(1, box_predicted.size(1)))
-
     regression_loss = F.smooth_l1_loss(box_target, selected_preds)
     # IoU-based Loss
     iou_loss = 1.0 - maxvals.mean()
-
     # Combine the two losses
     lambda_factor = 1.0  
     reg_loss = iou_loss + lambda_factor * regression_loss
     print(f"Reg loss is {reg_loss}")
+    # Calculate losses for logistic regression
+    selected_logits = logits.gather(0, maxidx.unsqueeze(-1).repeat(1, logits.size(1)))
+    print(f"Selected logits are {selected_logits.shape}")
+    targets_logits=[]
+    for idx,logit in enumerate(selected_logits):
+        tgt_lgt=torch.zeros_like(logit)
+        rng=object_positions_dict[caption_objects[idx]]
+        tgt_lgt[rng[0]:rng[1]]=1.0
+        tgt_lgt=tgt_lgt.unsqueeze(dim=0)
+        targets_logits.append(tgt_lgt)
+        #print(f"Target logit for label {caption_objects[idx]} {tgt_lgt}")
 
+    targets_logits=result = torch.cat(targets_logits, dim=0)
+    print(f"Target Logits shape is {targets_logits.shape}")
 
 
 
