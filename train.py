@@ -88,6 +88,9 @@ def read_dataset(ann_file):
 
 
 def train(model, ann_file, epochs=1, save_path='./model_weights.pth'):
+    # Read Dataset
+    ann_Dict = read_dataset(ann_file)
+    
     # Add optimizer
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
     
@@ -95,8 +98,6 @@ def train(model, ann_file, epochs=1, save_path='./model_weights.pth'):
     model.train()
 
     for epoch in range(epochs):
-        ann_Dict = read_dataset(ann_file)
-        
         total_loss = 0  # Track the total loss for this epoch
         for idx, (IMAGE_PATH, vals) in enumerate(ann_Dict.items()):
             image_source, image = load_image(IMAGE_PATH)

@@ -111,7 +111,7 @@ def train_image(model,
     print(f"Regression and Classification loss are {reg_loss} and {cls_loss}")
 
     # Total loss
-    delta_factor=1.0
+    delta_factor=0.1
     total_loss = cls_loss + delta_factor*reg_loss  
 
     return total_loss
