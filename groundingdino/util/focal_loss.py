@@ -10,7 +10,8 @@ class FocalLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        #BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        BCE_loss = F.binary_cross_entropy(inputs, targets, reduction='none')
         pt = torch.exp(-BCE_loss)  # Compute the probability of the ground truth class
         F_loss = self.alpha * (1-pt)**self.gamma * BCE_loss
 

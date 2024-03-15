@@ -42,6 +42,7 @@ groundingdino/util/misc.py
 groundingdino/util/slconfig.py
 groundingdino/util/slio.py
 groundingdino/util/time_counter.py
+groundingdino/util/train.py
 groundingdino/util/utils.py
 groundingdino/util/visualizer.py
 groundingdino/util/vl_utils.py

@@ -87,7 +87,7 @@ def read_dataset(ann_file):
     return ann_Dict
 
 
-def train(model, ann_file, epochs=1, save_path='./model_weights.pth'):
+def train(model, ann_file, epochs=1, save_path='weights/model_weights',save_epoch=50):
     # Read Dataset
     ann_Dict = read_dataset(ann_file)
     
@@ -125,12 +125,12 @@ def train(model, ann_file, epochs=1, save_path='./model_weights.pth'):
 
         # Print the average loss for the epoch
         print(f"Epoch {epoch+1}/{epochs}, Average Loss: {total_loss / len(ann_Dict)}")
-        
-        # Save the model's weights after each epoch
-        torch.save(model.state_dict(), save_path)
-        print(f"Model weights saved to {save_path}")
+        if (epoch%save_epoch)==0:
+            # Save the model's weights after each epoch
+            torch.save(model.state_dict(), f"{save_path}{epoch}.pth")
+            print(f"Model weights saved to {save_path}{epoch}.pth")
 
 
 
 if __name__=="__main__":
-    train(model=model, ann_file=ann_file, epochs=500, save_path='./fine_tune_model_weights.pth')
+    train(model=model, ann_file=ann_file, epochs=5000, save_path='weights/model_weights')
