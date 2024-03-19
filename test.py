@@ -11,7 +11,7 @@ def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
     scaled_boxes = box_convert(boxes=scaled_boxes, in_fmt="cxcywh", out_fmt="xyxy")
     nms_boxes_list, nms_logits_list, nms_phrases_list = [], [], []
 
-    print(f"The unique phrases are {set(phrases)}")
+    print(f"The unique detected phrases are {set(phrases)}")
 
     for unique_phrase in set(phrases):
         indices = [i for i, phrase in enumerate(phrases) if phrase == unique_phrase]
@@ -30,14 +30,13 @@ def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
 def process_image(
         model_config="groundingdino/config/GroundingDINO_SwinT_OGC.py",
         model_weights="weights/groundingdino_swint_ogc.pth",
-        state_dict_path="weights/model_weights2000.pth",
         image_path="test_pepper.jpg",
         text_prompt="peduncle.fruit.",
         box_threshold=0.8,
         text_threshold=0.40
 ):
     model = load_model(model_config, model_weights)
-    model.load_state_dict(torch.load(state_dict_path))
+    #model.load_state_dict(torch.load(state_dict_path))
     image_source, image = load_image(image_path)
 
     boxes, logits, phrases = predict(
@@ -57,4 +56,6 @@ def process_image(
 
 
 if __name__ == "__main__":
-    process_image()
+    #model_weights="weights/groundingdino_swint_ogc.pth"
+    model_weights="weights/model_weights2000.pth"
+    process_image(model_weights=model_weights)
