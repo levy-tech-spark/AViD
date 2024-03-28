@@ -133,4 +133,4 @@ def train(model, ann_file, epochs=1, save_path='weights/model_weights',save_epoc
 
 
 if __name__=="__main__":
-    train(model=model, ann_file=ann_file, epochs=5000, save_path='weights/model_weights')
+    train(model=model, ann_file=ann_file, epochs=2000, save_path='weights/model_weights')
