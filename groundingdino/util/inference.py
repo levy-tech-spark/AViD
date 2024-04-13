@@ -29,14 +29,19 @@ def preprocess_caption(caption: str) -> str:
     return result + "."
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda"):
+def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda",strict: bool =False):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
-    model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+    if "model" in checkpoint.keys():
+        model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=strict)
+    else:
+        # The state dict is the checkpoint
+        model.load_state_dict(clean_state_dict(checkpoint), strict=True)
     model.eval()
     return model
+
 
 
 def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
