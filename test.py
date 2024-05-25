@@ -30,8 +30,8 @@ def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
 def process_image(
         model_config="groundingdino/config/GroundingDINO_SwinT_OGC.py",
         model_weights="weights/groundingdino_swint_ogc.pth",
-        image_path="test_pepper.jpg",
-        text_prompt="peduncle.fruit.",
+        image_path="multimodal-data/fashion_dataset_subset/images/val/val_000043.jpg",
+        text_prompt="shirt.bag.pants",
         box_threshold=0.8,
         text_threshold=0.40
 ):
@@ -56,6 +56,6 @@ def process_image(
 
 
 if __name__ == "__main__":
-    #model_weights="weights/groundingdino_swint_ogc.pth"
-    model_weights="weights/model_weights2000.pth"
+    model_weights="weights/groundingdino_swint_ogc.pth"
+    #model_weights="weights/model_weights2000.pth"
     process_image(model_weights=model_weights)
