@@ -11,8 +11,8 @@ import torch.optim as optim
 model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth")
 
 # Dataset paths
-images_files=sorted(os.listdir("multimodal-data/images"))
-ann_file="multimodal-data/annotation/annotation.csv"
+images_files=sorted(os.listdir("multimodal-data/fashion_dataset_subset/images/train"))
+ann_file="multimodal-data/fashion_dataset_subset/train_annotations.csv"
 
 def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255), thickness=2, font_scale=0.5):
     """
