@@ -1,5 +1,5 @@
 #torch
-torchvision
+#torchvision
 transformers
 addict
 yapf
@@ -8,4 +8,4 @@ numpy
 opencv-python
 supervision==0.6.0
 pycocotools
-setuptools==65.5.1 
+#setuptools==65.5.1 

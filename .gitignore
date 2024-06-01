@@ -10,3 +10,4 @@ git_commit_push.sh
 gitconfig.sh 
 
 **/multimodal-data/
+vis_Dataset/

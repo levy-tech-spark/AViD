@@ -11,8 +11,20 @@ import torch.optim as optim
 model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth")
 
 # Dataset paths
-images_files=sorted(os.listdir("multimodal-data/fashion_dataset_subset/images/train"))
-ann_file="multimodal-data/fashion_dataset_subset/train_annotations.csv"
+images_dir="multimodal-data/fashion_dataset_subset/images/train"
+ann_dir="multimodal-data/fashion_dataset_subset/train_annotations.csv"
+## Train and validation images
+train_images_dir=os.path.join(images_dir,"train")
+train_ann_file=os.path.join(images_dir,"train_annotations.csv")
+val_images_dir=os.path.join(images_dir,"val")
+val_ann_file=os.path.join(images_dir,"val_annotations.csv")
+
+data_dict={
+    'train_dir':train_images_dir,
+    'train_ann':train_ann_file,
+    'val_dir':val_images_dir,
+    'val_ann':val_ann_file,
+}
 
 def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255), thickness=2, font_scale=0.5):
     """
@@ -68,7 +80,7 @@ def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255
 
 
 
-def read_dataset(ann_file):
+def read_dataset(img_dir,ann_file):
     ann_Dict= defaultdict(lambda: defaultdict(list))
     with open(ann_file) as file_obj:
         ann_reader= csv.DictReader(file_obj)  
@@ -76,7 +88,7 @@ def read_dataset(ann_file):
         # using reader object
         for row in ann_reader:
             #print(row)
-            img_n=os.path.join("multimodal-data/images",row['image_name'])
+            img_n=os.path.join(img_dir,row['image_name'])
             x1=int(row['bbox_x'])
             y1=int(row['bbox_y'])
             x2=x1+int(row['bbox_width'])
@@ -87,9 +99,9 @@ def read_dataset(ann_file):
     return ann_Dict
 
 
-def train(model, ann_file, epochs=1, save_path='weights/model_weights',save_epoch=50):
+def train(model, data, epochs=1, save_path='weights/model_weights',save_epoch=50):
     # Read Dataset
-    ann_Dict = read_dataset(ann_file)
+    train_Dict = read_dataset(data['train_dir'],data['train_ann'])
     
     # Add optimizer
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
@@ -99,7 +111,7 @@ def train(model, ann_file, epochs=1, save_path='weights/model_weights',save_epoc
 
     for epoch in range(epochs):
         total_loss = 0  # Track the total loss for this epoch
-        for idx, (IMAGE_PATH, vals) in enumerate(ann_Dict.items()):
+        for idx, (IMAGE_PATH, vals) in enumerate(train_Dict.items()):
             image_source, image = load_image(IMAGE_PATH)
             bxs = vals['boxes']
             captions = vals['captions']
@@ -133,4 +145,4 @@ def train(model, ann_file, epochs=1, save_path='weights/model_weights',save_epoc
 
 
 if __name__=="__main__":
-    train(model=model, ann_file=ann_file, epochs=2000, save_path='weights/model_weights')
+    train(model=model, data=data_dict, epochs=2000, save_path='weights/model_weights')
