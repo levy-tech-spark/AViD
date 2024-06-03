@@ -1,7 +1,6 @@
 from groundingdino.util.train import load_model, load_image,train_image, annotate
 import cv2
 import os
-import json
 import csv
 import torch
 from collections import defaultdict
@@ -11,13 +10,13 @@ import torch.optim as optim
 model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth")
 
 # Dataset paths
-images_dir="multimodal-data/fashion_dataset_subset/images/train"
-ann_dir="multimodal-data/fashion_dataset_subset/train_annotations.csv"
+images_dir="multimodal-data/fashion_dataset_subset/images/"
+ann_dir="multimodal-data/fashion_dataset_subset/"
 ## Train and validation images
 train_images_dir=os.path.join(images_dir,"train")
-train_ann_file=os.path.join(images_dir,"train_annotations.csv")
+train_ann_file=os.path.join(ann_dir,"train_annotations2.csv")
 val_images_dir=os.path.join(images_dir,"val")
-val_ann_file=os.path.join(images_dir,"val_annotations.csv")
+val_ann_file=os.path.join(ann_dir,"val_annotations.csv")
 
 data_dict={
     'train_dir':train_images_dir,
@@ -52,33 +51,6 @@ def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255
     # Save the modified image
     cv2.imwrite(output_path, image)
 
-def draw_box_with_label(image, output_path, coordinates, label, color=(0, 0, 255), thickness=2, font_scale=0.5):
-    """
-    Draw a box and a label on an image using OpenCV.
-
-    Parameters:
-    - image (str):  Input image.
-    - output_path (str): Path to save the image with the box and label.
-    - coordinates (tuple): A tuple (x1, y1, x2, y2) indicating the top-left and bottom-right corners of the box.
-    - label (str): The label text to be drawn next to the box.
-    - color (tuple, optional): Color of the box and label in BGR format. Default is red (0, 0, 255).
-    - thickness (int, optional): Thickness of the box's border. Default is 2 pixels.
-    - font_scale (float, optional): Font scale for the label. Default is 0.5.
-    """
-    
-    # Draw the rectangle
-    cv2.rectangle(image, (coordinates[0], coordinates[1]), (coordinates[2], coordinates[3]), color, thickness)
-    
-    # Define a position for the label (just above the top-left corner of the rectangle)
-    label_position = (coordinates[0], coordinates[1]-10)
-    
-    # Draw the label
-    cv2.putText(image, label, label_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness, cv2.LINE_AA)
-    
-    # Save the modified image
-    cv2.imwrite(output_path, image)
-
-
 
 def read_dataset(img_dir,ann_file):
     ann_Dict= defaultdict(lambda: defaultdict(list))
@@ -86,7 +58,7 @@ def read_dataset(img_dir,ann_file):
         ann_reader= csv.DictReader(file_obj)  
         # Iterate over each row in the csv file
         # using reader object
-        for row in ann_reader:
+        for i,row in enumerate(ann_reader):
             #print(row)
             img_n=os.path.join(img_dir,row['image_name'])
             x1=int(row['bbox_x'])
@@ -94,6 +66,7 @@ def read_dataset(img_dir,ann_file):
             x2=x1+int(row['bbox_width'])
             y2=y1+int(row['bbox_height'])
             label=row['label_name']
+            #draw_box_with_label(cv2.imread(img_n),f"vis_Dataset/{i}.png",(x1,y1,x2,y2),label)
             ann_Dict[img_n]['boxes'].append([x1,y1,x2,y2])
             ann_Dict[img_n]['captions'].append(label)
     return ann_Dict
@@ -133,10 +106,10 @@ def train(model, data, epochs=1, save_path='weights/model_weights',save_epoch=50
             optimizer.step()
             
             total_loss += loss.item()  # Accumulate the loss
-            print(f"Processed image {idx+1}/{len(ann_Dict)}, Loss: {loss.item()}")
+            print(f"Processed image {idx+1}/{len(train_Dict)}, Loss: {loss.item()}")
 
         # Print the average loss for the epoch
-        print(f"Epoch {epoch+1}/{epochs}, Average Loss: {total_loss / len(ann_Dict)}")
+        print(f"Epoch {epoch+1}/{epochs}, Average Loss: {total_loss / len(train_Dict)}")
         if (epoch%save_epoch)==0:
             # Save the model's weights after each epoch
             torch.save(model.state_dict(), f"{save_path}{epoch}.pth")
