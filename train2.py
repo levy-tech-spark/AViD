@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from groundingdino.util.train import load_model, load_image,train_image, annotate
 from torchvision.ops import box_convert  
 from torchvision.ops import generalized_box_iou  
+from groundingdino.util.misc import nested_tensor_from_tensor_list
 
 
 def box_xyxy_to_cxcywh(boxes):
@@ -219,35 +220,32 @@ class GroundingDINOTrainer:
         self.temperature = temperature
 
     def prepare_batch(self, batch):
-        """Prepare batch for training"""
+        """Prepare batch according to Grounding DINO specifications"""
         images, targets = batch
         
-        # Move images to device
+        # Convert list of images to NestedTensor and move to device
         if isinstance(images, (list, tuple)):
-            images = [image.to(self.device) for image in images]
-        else:
-            images = images.to(self.device)
-            
-        # Prepare text inputs and targets for each image
+            images = nested_tensor_from_tensor_list(images)  # Convert list to NestedTensor
+        images = images.to(self.device)
+                
         processed_targets = []
         captions = []
         
         for target in targets:
-            # Create caption from phrases
             phrases = target['phrases']
-            caption = ".".join(phrases) + "." ## Prefered in their github readme
+            # Format caption with periods without spaces
+            caption = ".".join(phrases) + "."
             captions.append(caption)
-                
-            # Create positive map
+            
             boxes = target['boxes'].to(self.device)
             processed_target = {
                 'boxes': boxes,
-                'phrases': phrases,
-                'image_size': target['image_size']
+                'image_size': target['image_size'],
+                'phrases': phrases
             }
             processed_targets.append(processed_target)
             
-        return images, processed_targets, captions
+    return images, processed_targets, captions
 
     def compute_loss(self, outputs, targets, captions):
         batch_losses = defaultdict(float)
