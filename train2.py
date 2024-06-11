@@ -245,7 +245,7 @@ class GroundingDINOTrainer:
             }
             processed_targets.append(processed_target)
             
-    return images, processed_targets, captions
+        return images, processed_targets, captions
 
     def compute_loss(self, outputs, targets, captions):
         batch_losses = defaultdict(float)
