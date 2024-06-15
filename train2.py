@@ -9,6 +9,10 @@ from groundingdino.util.train import load_model, load_image,train_image, annotat
 from torchvision.ops import box_convert  
 from torchvision.ops import generalized_box_iou  
 from groundingdino.util.misc import nested_tensor_from_tensor_list
+from torchvision.ops import box_iou, generalized_box_iou
+from scipy.optimize import linear_sum_assignment
+import torch.nn as nn
+from groundingdino.models.GroundingDINO.utils import sigmoid_focal_loss
 
 
 def box_xyxy_to_cxcywh(boxes):
@@ -19,134 +23,90 @@ def box_cxcywh_to_xyxy(boxes):
     """Convert boxes from cxcywh to xyxy format"""
     return box_convert(boxes, in_fmt='cxcywh', out_fmt='xyxy')
 
-def sigmoid_focal_loss(
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    alpha: float = 0.25,
-    gamma: float = 2.0,
-    reduction: str = "mean"
-) -> torch.Tensor:
-    """
-    Sigmoid focal loss as used in Grounding DINO.
-    
-    Args:
-        inputs: Prediction tensor (unnormalized) of shape [N, *]
-        targets: Target tensor (binary) of shape [N, *]
-        alpha: Weighting factor for positive examples (default: 0.25)
-        gamma: Focusing parameter (default: 2.0)
-        reduction: 'none' | 'mean' | 'sum'
-        
-    Returns:
-        Computed focal loss
-    """
-    # Flatten the tensors if needed
-    if inputs.ndim > 2:
-        inputs = inputs.view(inputs.size(0), -1)
-    if targets.ndim > 2:
-        targets = targets.view(targets.size(0), -1)
-        
-    # Convert targets to float for calculations
-    targets = targets.to(dtype=torch.float32)
-    
-    # Apply sigmoid to inputs
-    prob = torch.sigmoid(inputs)
-    
-    # Calculate cross entropy
-    ce_loss = F.binary_cross_entropy_with_logits(
-        inputs, targets, reduction="none"
-    )
-    
-    # Calculate focal term
-    p_t = prob * targets + (1 - prob) * (1 - targets)
-    focal_term = (1 - p_t) ** gamma
-    
-    # Apply alpha weighting
-    loss = focal_term * ce_loss
-    alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-    loss = alpha_t * loss
-    
-    # Apply reduction
-    if reduction == "mean":
-        loss = loss.mean()
-    elif reduction == "sum":
-        loss = loss.sum()
-    
-    return loss
 
-
-def create_positive_map(caption_objects, tokenized, tokenizer):
+class HungarianMatcher(nn.Module):
     """
-    Create positive mapping between boxes and text tokens
-    Returns tensor of shape [B, num_boxes, num_tokens]
+    Hungarian Matcher from DETR
+    Computes an assignment between the targets and the predictions of the network
     """
-    num_tokens = tokenized.input_ids.size(1)
-    positive_map = torch.zeros((1, len(caption_objects), num_tokens), 
-                             dtype=torch.bool,
-                             device=tokenized.input_ids.device)
-    
-    for box_idx, obj in enumerate(caption_objects):
-        # Get token span for this object
-        obj_tokens = tokenizer(obj + ".", add_special_tokens=False)['input_ids']
+    def __init__(self, class_cost: float = 2, bbox_cost: float = 5, giou_cost: float = 2):
+        super().__init__()
+        self.class_cost = class_cost
+        self.bbox_cost = bbox_cost 
+        self.giou_cost = giou_cost
         
-        # Find token span in full text
-        for i in range(num_tokens):
-            if tokenized.input_ids[0][i:i+len(obj_tokens)-1].tolist() == obj_tokens[:-1]:
-                positive_map[0, box_idx, i:i+len(obj_tokens)-1] = True
+    @torch.no_grad()
+    def forward(self, outputs, targets):
+        bs, num_queries = outputs["pred_logits"].shape[:2]
+        
+        # We flatten to compute the cost matrices in a batch
+        pred_boxes = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
+        
+        # Also concat the target boxes
+        target_boxes = torch.cat([t["boxes"] for t in targets])
+        
+        # Compute the L1 cost between boxes
+        cost_bbox = torch.cdist(pred_boxes, target_boxes, p=1)
+        
+        # Compute the giou cost between boxes
+        cost_giou = -generalized_box_iou(
+            box_cxcywh_to_xyxy(pred_boxes),
+            box_cxcywh_to_xyxy(target_boxes)
+        )
+        
+        # Compute text similarity cost
+        pred_logits = outputs["pred_logits"].flatten(0, 1)  # [batch_size * num_queries, hidden_dim]
+        text_embeddings = outputs.get("proj_tokens", None)
+        if text_embeddings is not None:
+            text_embeddings = text_embeddings.flatten(0, 1)  # [batch_size * num_tokens, hidden_dim]
+            # Normalize features
+            pred_logits = F.normalize(pred_logits, dim=-1)
+            text_embeddings = F.normalize(text_embeddings, dim=-1)
+            # Compute similarity
+            cost_class = -torch.mm(pred_logits, text_embeddings.transpose(0, 1))
+        else:
+            cost_class = torch.zeros_like(cost_bbox)
+
+        # Final cost matrix
+        C = (
+            self.bbox_cost * cost_bbox +
+            self.class_cost * cost_class + 
+            self.giou_cost * cost_giou
+        )
+        C = C.view(bs, num_queries, -1).cpu()
+
+        sizes = [len(v["boxes"]) for v in targets]
+        indices = [
+            linear_sum_assignment(c[i].cpu()) 
+            for i, c in enumerate(C.split(sizes, -1))
+        ]
+        return [(torch.as_tensor(i, dtype=torch.int64), 
+                torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+        
+
+def create_positive_map_from_phrases(phrases, tokenized, tokenizer):
+    """Create positive map between boxes and text tokens"""
+    # Get token ids for full text
+    token_ids = tokenized.input_ids[0]  # [num_tokens]
+    positive_map = torch.zeros(len(phrases), len(token_ids), dtype=torch.bool, 
+                            device=token_ids.device)
+    
+    for i, phrase in enumerate(phrases):
+        # Tokenize individual phrase - no special tokens
+        phrase_tokens = tokenizer(
+            phrase, 
+            add_special_tokens=False, 
+            return_tensors="pt"
+        ).input_ids[0]
+        
+        # Find matching span in full text
+        phrase_len = len(phrase_tokens)
+        for j in range(len(token_ids) - phrase_len + 1):
+            if token_ids[j:j+phrase_len].tolist() == phrase_tokens.tolist():
+                positive_map[i, j:j+phrase_len] = True
                 break
                 
     return positive_map
-
-
-
-def compute_contrastive_loss(self, 
-                           pred_logits: torch.Tensor,  # [B, num_queries, hidden_dim]
-                           text_embeddings: torch.Tensor,  # [B, num_tokens, hidden_dim] 
-                           text_token_mask: torch.Tensor,  # [B, num_tokens]
-                           positive_map: torch.Tensor,  # [B, num_boxes, num_tokens]
-                           num_boxes: int,
-                           temperature: float = 0.07):
-    """
-    Compute contrastive loss between predicted box features and text token features
-    Args:
-        pred_logits: Box feature predictions [B, num_queries, hidden_dim]
-        text_embeddings: Text token embeddings [B, num_tokens, hidden_dim]
-        text_token_mask: Mask for valid text tokens [B, num_tokens]
-        positive_map: Binary matrix mapping boxes to text tokens [B, num_boxes, num_tokens]
-        num_boxes: Number of ground truth boxes
-        temperature: Temperature parameter for contrastive loss
-    """
-    # Normalize features
-    pred_logits = F.normalize(pred_logits, dim=-1)
-    text_embeddings = F.normalize(text_embeddings, dim=-1)
-    
-    # Compute similarity matrix
-    similarity = torch.bmm(pred_logits, text_embeddings.transpose(-2, -1)) / temperature
-    
-    # Mask out padding tokens
-    similarity = similarity.masked_fill(~text_token_mask[:, None, :], float('-inf'))
-    
-    # For each box, get its matching text span
-    sim_max, sim_max_idx = similarity.max(dim=-1)  # [B, num_queries]
-    
-    # Compute contrastive loss 
-    pos_mask = positive_map.any(dim=-1)  # [B, num_boxes]
-    neg_mask = ~pos_mask
-    
-    pos_sim = sim_max[pos_mask]
-    neg_sim = sim_max[neg_mask]
-    
-    labels = torch.zeros_like(sim_max, dtype=torch.long)
-    labels[pos_mask] = 1
-    
-    loss = sigmoid_focal_loss(
-        sim_max.unsqueeze(-1),
-        labels.unsqueeze(-1),
-        alpha=0.25,
-        gamma=2.0,
-        reduction='mean'
-    )
-    return loss
-
 
 
 class GroundingDINODataset(Dataset):
@@ -248,56 +208,78 @@ class GroundingDINOTrainer:
         return images, processed_targets, captions
 
     def compute_loss(self, outputs, targets, captions):
+        """Compute losses using model's functions"""
         batch_losses = defaultdict(float)
         batch_size = len(targets)
         
-        for idx, (target, caption) in enumerate(zip(targets, captions)):
-            # Get predictions for this image
-            pred_logits = outputs["pred_logits"][idx]
-            pred_boxes = outputs["pred_boxes"][idx]
-            text_embeddings = outputs.get("proj_tokens")
+        #Hungarian matching indices
+        matcher = HungarianMatcher(
+            class_cost=self.class_loss_coef,
+            bbox_cost=self.bbox_loss_coef,
+            giou_cost=self.giou_loss_coef
+        )
+        indices = matcher(outputs, targets)
+        
+        for idx, ((pred_idx, tgt_idx), target) in enumerate(zip(indices, targets)):
+            # Get predictions
+            pred_boxes = outputs["pred_boxes"][idx][pred_idx]  # [num_matched, 4]
+            pred_logits = outputs["pred_logits"][idx]  # [num_queries, max_text_len]
+            # Below is same as valid tokens since we have preds logits of shape 900x 256 but if only something like 8 first tokens are valid in out input
+            ## rest will be pred as -inf
+            valid_mask = ~torch.isinf(pred_logits)
             
-            # Create positive map for text-box alignment
-            positive_map = create_positive_map(
-                target['phrases'],
-                caption,
-                self.model.tokenizer,
-                self.device
-            )
-            
-            # Compute contrastive loss
-            if text_embeddings is not None:
-                contrastive_loss = compute_contrastive_loss(
-                    pred_logits.unsqueeze(0),
-                    text_embeddings[idx:idx+1],
-                    positive_map,
-                    len(target_boxes),
-                    self.temperature
-                )
-                batch_losses['contrastive_loss'] += contrastive_loss
-            
+            # Box losses
+            # Normalize target boxes
             h, w = target['image_size']
             scale_fct = torch.tensor([w, h, w, h], device=self.device)
-            target_boxes = box_xyxy_to_cxcywh(target['boxes']) / scale_fct
+            target_boxes = box_xyxy_to_cxcywh(target['boxes'][tgt_idx]) / scale_fct
             
-            # Compute box losses
+            # L1 loss - from their util
             bbox_loss = F.l1_loss(pred_boxes, target_boxes, reduction='none').sum() / len(target_boxes)
+            
+            # GIoU loss
             giou_loss = 1 - generalized_box_iou(
                 box_cxcywh_to_xyxy(pred_boxes),
                 box_cxcywh_to_xyxy(target_boxes)
             ).diag().mean()
+            
+            # Classification loss using their sigmoid_focal_loss
+            num_queries = pred_logits.shape[0]
+            
+            # Initialize target tensor - zeros for all queries
+            target_labels = torch.zeros_like(pred_logits)  # [num_queries, max_text_len]
+            # Create positive map for the text tokens
+            positive_map = create_positive_map_from_phrases(
+                target['phrases'],
+                self.model.tokenizer(captions[idx], return_tensors="pt").to(self.device),
+                self.model.tokenizer
+            )  # [num_gt, num_tokens]
 
+            # For matched pairs, assign corresponding positive map rows
+            for i, j in zip(pred_idx, tgt_idx):
+                target_labels[i, :positive_map.shape[1]] = positive_map[j]
+
+            # Use their sigmoid_focal_loss
+            class_loss = sigmoid_focal_loss(
+                pred_logits[valid_mask].unsqueeze(0),
+                target_labels[valid_mask].unsqueeze(0),
+                num_boxes=len(target_boxes),
+                alpha=0.25,
+                gamma=2.0
+            )
+            
+            batch_losses['class_loss'] += class_loss
             batch_losses['bbox_loss'] += bbox_loss
             batch_losses['giou_loss'] += giou_loss
         
-        # Average losses over batch
+        # Average over batch
         for k in batch_losses:
             batch_losses[k] /= batch_size
         
-        # Combine losses
+        # Combine with coefficients
         total_loss = (
-            self.class_loss_coef * batch_losses['contrastive_loss'] +
-            self.bbox_loss_coef * batch_losses['bbox_loss'] +
+            self.class_loss_coef * batch_losses['class_loss'] +
+            self.bbox_loss_coef * batch_losses['bbox_loss'] + 
             self.giou_loss_coef * batch_losses['giou_loss']
         )
         
