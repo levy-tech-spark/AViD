@@ -311,7 +311,7 @@ def train(
     model,
     data_dict,
     num_epochs=10,
-    batch_size=1,
+    batch_size=2,
     learning_rate=1e-4,
     save_dir='weights',
     save_frequency=1
@@ -347,7 +347,7 @@ def train(
                 epoch_losses[k].append(v)
             
             # Print progress
-            if batch_idx % 10 == 0:
+            if batch_idx % 5 == 0:
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
         
