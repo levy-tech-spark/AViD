@@ -12,6 +12,7 @@ from groundingdino.util.misc import nested_tensor_from_tensor_list
 from torchvision.ops import box_iou, generalized_box_iou
 from scipy.optimize import linear_sum_assignment
 import torch.nn as nn
+import supervision as sv
 from groundingdino.models.GroundingDINO.utils import sigmoid_focal_loss
 
 
@@ -82,7 +83,48 @@ class HungarianMatcher(nn.Module):
         ]
         return [(torch.as_tensor(i, dtype=torch.int64), 
                 torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
-        
+
+
+def visualize_predictions(model, image, caption, epoch, idx, save_dir):
+    """Visualize and save predictions with better annotations"""
+    with torch.no_grad():
+        outputs = model(image, captions=[caption])
+    
+    # Convert image tensor to numpy
+    img = image.tensors[0].cpu().permute(1,2,0).numpy()
+    h, w, _ = img.shape
+    
+    # Process boxes and logits
+    boxes = outputs["pred_boxes"][0]
+    logits = outputs["pred_logits"][0].sigmoid().max(dim=1)[0]
+    boxes = boxes * torch.tensor([w, h, w, h])
+    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+    
+    # Create detections
+    detections = sv.Detections(xyxy=xyxy)
+    
+    # Create labels with confidence scores
+    labels = [f"{caption.split('.')[0]} {logit:.2f}" for logit in logits]
+    
+    # Initialize annotator with custom settings
+    box_annotator = sv.BoxAnnotator(
+        thickness=2,
+        text_scale=0.8,
+        text_padding=3
+    )
+    
+    # Convert RGB to BGR and annotate
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    annotated_frame = box_annotator.annotate(
+        scene=img_bgr, 
+        detections=detections, 
+        labels=labels
+    )
+    
+    # Save
+    os.makedirs(f"{save_dir}/epoch_{epoch}", exist_ok=True)
+    cv2.imwrite(f"{save_dir}/epoch_{epoch}/pred_{idx}.jpg", annotated_frame)
+
 
 def create_positive_map_from_phrases(phrases, tokenized, tokenizer):
     """Create positive map between boxes and text tokens"""
@@ -155,7 +197,7 @@ class GroundingDINODataset(Dataset):
             'boxes': boxes,
             'phrases': phrases,
             'image_size': orig_size,
-            'image_path': img_path
+            'image_source': image_source
         }
         
         return image, target
@@ -201,6 +243,7 @@ class GroundingDINOTrainer:
             processed_target = {
                 'boxes': boxes,
                 'image_size': target['image_size'],
+                'image_source': target['image_source'],
                 'phrases': phrases
             }
             processed_targets.append(processed_target)
@@ -293,14 +336,8 @@ class GroundingDINOTrainer:
         
         # Prepare batch
         images, targets, captions = self.prepare_batch(batch)
-        
-        # Forward pass
         outputs = self.model(images, captions=captions)
-        
-        # Compute losses
         losses = self.compute_loss(outputs, targets, captions)
-        
-        # Backward pass
         losses['total_loss'].backward()
         self.optimizer.step()
         
