@@ -371,6 +371,7 @@ def train(
     # Initialize optimizer and trainer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     trainer = GroundingDINOTrainer(model, optimizer)
+    visualizer = GroudingDinoVisualizer()
     
     # Training loop
     for epoch in range(num_epochs):
@@ -387,6 +388,7 @@ def train(
             if batch_idx % 5 == 0:
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
+            
         
         # Compute epoch averages
         avg_losses = {k: sum(v)/len(v) for k, v in epoch_losses.items()}
@@ -404,6 +406,10 @@ def train(
             save_path = os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth')
             torch.save(checkpoint, save_path)
             print(f"Saved checkpoint to {save_path}")
+            
+        ## Do visualization on val dataset  passed as input
+        
+        
 
 
 
