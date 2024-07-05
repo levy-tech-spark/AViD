@@ -87,49 +87,99 @@ class HungarianMatcher(nn.Module):
 
 
 class GroundingDINOVisualizer:
-   def __init__(self, save_dir, visualize_frequency=20):
-       self.save_dir = save_dir 
-       self.visualize_frequency = visualize_frequency
-       self.box_annotator = sv.BoxAnnotator(
+    
+    def __init__(self, save_dir, visualize_frequency=20):
+        
+        self.save_dir = save_dir 
+        self.visualize_frequency = visualize_frequency
+        # Different colors for pred vs gt boxes
+        self.pred_annotator = sv.BoxAnnotator(
+            color=sv.ColorPalette.default(), 
             thickness=2,
             text_scale=0.8,
             text_padding=3
         )
+        self.gt_annotator = sv.BoxAnnotator(
+            color=sv.Color.red(),
+            thickness=2, 
+            text_scale=0.8,
+            text_padding=3
+        )
+
     
-   def visualize_epoch(self, model, val_loader, epoch, prepare_data):
-       # Currently only support single batch size for inference as in test ## TODO Add bactching for visualizations
-       model.eval()
-       save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
-       os.makedirs(save_dir, exist_ok=True)
+    def visualize_epoch(self, model, val_loader, epoch, prepare_data):
+        model.eval()
+        save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
+        os.makedirs(save_dir, exist_ok=True)
 
-       with torch.no_grad():
-           for idx, batch in enumerate(val_loader):
-               images, targets, captions = prepare_data(batch)
-               outputs = model(images, captions=captions)
-               
-               # Visualize first image in batch
-               img = targets[0]["image_source"]
-               h, w, _ = img.shape
-               
-               boxes = outputs["pred_boxes"][0] 
-               logits = outputs["pred_logits"][0].sigmoid().max(dim=1)[0]
-               boxes = boxes * torch.tensor([w, h, w, h])
-               xyxy = box_convert(boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+        with torch.no_grad():
+            for idx, batch in enumerate(val_loader):
+                images, targets, captions = prepare_data(batch)
+                outputs = model(images, captions=captions)
+                
+                # Process first image
+                img = targets[0]["image_source"]
+                h, w, _ = img.shape
+                
+                # Get predictions
+                boxes = outputs["pred_boxes"][0].cpu() 
+                logits = outputs["pred_logits"][0].sigmoid()  # [num_queries, num_tokens]
+                
+                # Get text token mappings
+                text_tokens = targets[0].get("tokens", None)
+                if text_tokens is None:
+                    # If tokens not provided, split caption
+                    text_tokens = captions[0].split('.')
+                    
+                # Filter confident predictions (e.g. > 0.3)
+                confident_mask = logits > 0.3 
+                
+                # For each query, get all matched text tokens above threshold
+                pred_boxes = []
+                pred_labels = []
+                
+                for query_idx, (box, query_logits) in enumerate(zip(boxes, logits)):
+                    # Get all confident token matches for this query
+                    token_matches = confident_mask[query_idx].nonzero().squeeze(1)
+                    
+                    if len(token_matches) > 0:
+                        for token_idx in token_matches:
+                            conf = query_logits[token_idx].item()
+                            if token_idx < len(text_tokens):
+                                label = f"{text_tokens[token_idx]} ({conf:.2f})"
+                                pred_boxes.append(box)
+                                pred_labels.append(label)
 
-               detections = sv.Detections(xyxy=xyxy)
-               labels = [f"{captions[0].split('.')[0]} {logit:.2f}" for logit in logits]
+                # Convert to image coordinates
+                if pred_boxes:
+                    pred_boxes = torch.stack(pred_boxes) * torch.tensor([w, h, w, h])
+                    pred_xyxy = box_convert(pred_boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+                    
+                    # Draw predictions
+                    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    detections = sv.Detections(xyxy=pred_xyxy)
+                    img_bgr = self.pred_annotator.annotate(
+                        scene=img_bgr,
+                        detections=detections, 
+                        labels=pred_labels
+                    )
+                    
+                    # Draw ground truth
+                    if "boxes" in targets[0]:
+                        gt_boxes = targets[0]["boxes"].cpu() * torch.tensor([w, h, w, h])
+                        gt_xyxy = box_convert(gt_boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+                        gt_labels = targets[0].get("phrases", None)
+                        gt_detections = sv.Detections(xyxy=gt_xyxy)
+                        img_bgr = self.gt_annotator.annotate(
+                            scene=img_bgr,
+                            detections=gt_detections,
+                            labels=gt_labels
+                        )
+                    
+                    cv2.imwrite(f"{save_dir}/val_pred_{idx}.jpg", img_bgr)
 
-               img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-               annotated_frame = self.box_annotator.annotate(
-                   scene=img_bgr,
-                   detections=detections, 
-                   labels=labels
-               )
-
-               cv2.imwrite(f"{save_dir}/val_pred_{idx}.jpg", annotated_frame)
-
-               if idx >= self.visualize_frequency:
-                   break
+                if idx >= self.visualize_frequency:
+                    break
 
 
 def create_positive_map_from_phrases(phrases, tokenized, tokenizer):
