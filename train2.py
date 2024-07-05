@@ -85,45 +85,51 @@ class HungarianMatcher(nn.Module):
                 torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 
-def visualize_predictions(model, image, caption, epoch, idx, save_dir):
-    """Visualize and save predictions with better annotations"""
-    with torch.no_grad():
-        outputs = model(image, captions=[caption])
+
+class GroundingDINOVisualizer:
+   def __init__(self, save_dir, visualize_frequency=20):
+       self.save_dir = save_dir 
+       self.visualize_frequency = visualize_frequency
+       self.box_annotator = sv.BoxAnnotator(
+            thickness=2,
+            text_scale=0.8,
+            text_padding=3
+        )
     
-    # Convert image tensor to numpy
-    img = image.tensors[0].cpu().permute(1,2,0).numpy()
-    h, w, _ = img.shape
-    
-    # Process boxes and logits
-    boxes = outputs["pred_boxes"][0]
-    logits = outputs["pred_logits"][0].sigmoid().max(dim=1)[0]
-    boxes = boxes * torch.tensor([w, h, w, h])
-    xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
-    
-    # Create detections
-    detections = sv.Detections(xyxy=xyxy)
-    
-    # Create labels with confidence scores
-    labels = [f"{caption.split('.')[0]} {logit:.2f}" for logit in logits]
-    
-    # Initialize annotator with custom settings
-    box_annotator = sv.BoxAnnotator(
-        thickness=2,
-        text_scale=0.8,
-        text_padding=3
-    )
-    
-    # Convert RGB to BGR and annotate
-    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    annotated_frame = box_annotator.annotate(
-        scene=img_bgr, 
-        detections=detections, 
-        labels=labels
-    )
-    
-    # Save
-    os.makedirs(f"{save_dir}/epoch_{epoch}", exist_ok=True)
-    cv2.imwrite(f"{save_dir}/epoch_{epoch}/pred_{idx}.jpg", annotated_frame)
+   def visualize_epoch(self, model, val_loader, epoch, prepare_data):
+       # Currently only support single batch size for inference as in test ## TODO Add bactching for visualizations
+       model.eval()
+       save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
+       os.makedirs(save_dir, exist_ok=True)
+
+       with torch.no_grad():
+           for idx, batch in enumerate(val_loader):
+               images, targets, captions = prepare_data(batch)
+               outputs = model(images, captions=captions)
+               
+               # Visualize first image in batch
+               img = targets[0]["image_source"]
+               h, w, _ = img.shape
+               
+               boxes = outputs["pred_boxes"][0] 
+               logits = outputs["pred_logits"][0].sigmoid().max(dim=1)[0]
+               boxes = boxes * torch.tensor([w, h, w, h])
+               xyxy = box_convert(boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+
+               detections = sv.Detections(xyxy=xyxy)
+               labels = [f"{captions[0].split('.')[0]} {logit:.2f}" for logit in logits]
+
+               img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+               annotated_frame = self.box_annotator.annotate(
+                   scene=img_bgr,
+                   detections=detections, 
+                   labels=labels
+               )
+
+               cv2.imwrite(f"{save_dir}/val_pred_{idx}.jpg", annotated_frame)
+
+               if idx >= self.visualize_frequency:
+                   break
 
 
 def create_positive_map_from_phrases(phrases, tokenized, tokenizer):
@@ -348,13 +354,11 @@ def train(
     model,
     data_dict,
     num_epochs=10,
-    batch_size=2,
+    batch_size=1,
     learning_rate=1e-4,
     save_dir='weights',
     save_frequency=1
 ):
-    """Main training loop"""
-    # Create dataset and dataloader
     train_dataset = GroundingDINODataset(
         data_dict['train_dir'],
         data_dict['train_ann']
@@ -368,13 +372,15 @@ def train(
         collate_fn=lambda x: tuple(zip(*x)) 
     )
     
-    # Initialize optimizer and trainer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     trainer = GroundingDINOTrainer(model, optimizer)
-    visualizer = GroudingDinoVisualizer()
+    visualizer = GroundingDINOVisualizer(save_dir="visualizations")
     
-    # Training loop
     for epoch in range(num_epochs):
+        
+        ## Do visualization on val dataset passed as input loop through it
+        visualizer.visualize_epoch(model, train_loader, epoch, trainer.prepare_batch)
+        
         epoch_losses = defaultdict(list)
         
         for batch_idx, batch in enumerate(train_loader):
@@ -384,7 +390,6 @@ def train(
             for k, v in losses.items():
                 epoch_losses[k].append(v)
             
-            # Print progress
             if batch_idx % 5 == 0:
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
@@ -395,7 +400,6 @@ def train(
         print(f"Epoch {epoch+1} complete. Average losses:", 
               ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
         
-        # Save checkpoint
         if (epoch + 1) % save_frequency == 0:
             checkpoint = {
                 'epoch': epoch + 1,
@@ -407,9 +411,6 @@ def train(
             torch.save(checkpoint, save_path)
             print(f"Saved checkpoint to {save_path}")
             
-        ## Do visualization on val dataset  passed as input
-        
-        
 
 
 
