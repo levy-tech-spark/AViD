@@ -26,10 +26,6 @@ def box_cxcywh_to_xyxy(boxes):
 
 
 class HungarianMatcher(nn.Module):
-    """
-    Hungarian Matcher from DETR
-    Computes an assignment between the targets and the predictions of the network
-    """
     def __init__(self, class_cost: float = 2, bbox_cost: float = 5, giou_cost: float = 2):
         super().__init__()
         self.class_cost = class_cost
@@ -37,43 +33,82 @@ class HungarianMatcher(nn.Module):
         self.giou_cost = giou_cost
         
     @torch.no_grad()
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets,captions,tokenizer):
         bs, num_queries = outputs["pred_logits"].shape[:2]
         
-        # We flatten to compute the cost matrices in a batch
+        # Get predicted boxes
         pred_boxes = outputs["pred_boxes"].flatten(0, 1)  # [batch_size * num_queries, 4]
         
-        # Also concat the target boxes
-        target_boxes = torch.cat([t["boxes"] for t in targets])
+        # Process target boxes
+        target_boxes_list = []
+        for t in targets:
+            # Convert target boxes to cxcywh and normalize
+            h, w = t['image_size']
+            scale_fct = torch.tensor([w, h, w, h], device=pred_boxes.device)
+            t_boxes = box_xyxy_to_cxcywh(t["boxes"]) / scale_fct
+            target_boxes_list.append(t_boxes)
+            
+        target_boxes = torch.cat(target_boxes_list)
         
-        # Compute the L1 cost between boxes
+        # Compute the L1 cost between boxes (now in same coordinate system)
         cost_bbox = torch.cdist(pred_boxes, target_boxes, p=1)
         
         # Compute the giou cost between boxes
+        # Convert both to xyxy for GIoU computation (still normalized)
         cost_giou = -generalized_box_iou(
             box_cxcywh_to_xyxy(pred_boxes),
             box_cxcywh_to_xyxy(target_boxes)
         )
         
         # Compute text similarity cost
-        pred_logits = outputs["pred_logits"].flatten(0, 1)  # [batch_size * num_queries, hidden_dim]
+        pred_logits = outputs["pred_logits"].flatten(0, 1)
+        valid_mask = ~torch.isinf(pred_logits)
+        # Get only valid token predictions
+        pred_probs = pred_logits[valid_mask].sigmoid()  # [num_valid_tokens]
+        pred_probs= pred_probs.reshape(bs * num_queries, -1)
+        
         text_embeddings = outputs.get("proj_tokens", None)
+        
         if text_embeddings is not None:
-            text_embeddings = text_embeddings.flatten(0, 1)  # [batch_size * num_tokens, hidden_dim]
+            text_embeddings = text_embeddings.flatten(0, 1)  
             # Normalize features
             pred_logits = F.normalize(pred_logits, dim=-1)
             text_embeddings = F.normalize(text_embeddings, dim=-1)
-            # Compute similarity
             cost_class = -torch.mm(pred_logits, text_embeddings.transpose(0, 1))
         else:
-            cost_class = torch.zeros_like(cost_bbox)
+            #cost_class = torch.zeros_like(cost_bbox)
+            # Process all targets together
+            all_positive_maps = []
+            for idx, target in enumerate(targets):
+                # Create positive map using target phrases and full caption
+                positive_map = create_positive_map_from_phrases(
+                    target['phrases'],  # The labels/phrases we want to match
+                    tokenizer(captions[idx], return_tensors="pt").to(pred_logits.device),  # Full text caption
+                    tokenizer
+                )  # [num_targets, num_tokens]
+                all_positive_maps.append(positive_map)
+            
+            positive_maps = torch.cat(all_positive_maps, dim=0).to(pred_probs.dtype)  # [total_targets, num_tokens] 
+            # Compute similarity for all queries against all targets at once
+
+            cost_class = -(pred_probs @ positive_maps.t()) # [bs*num_queries, total_targets]
+            
+            # Normalize by number of positive tokens per target
+            cost_class = cost_class / (positive_maps.sum(dim=1) + 1e-8)
 
         # Final cost matrix
         C = (
             self.bbox_cost * cost_bbox +
             self.class_cost * cost_class + 
-            self.giou_cost * cost_giou
+            self.
+            giou_cost * cost_giou
         )
+        
+        k = 5  
+        values, indices = torch.topk(C[:,1], k=k, largest=False)  # False for smallest values
+        print(f"Top {k} smallest values:", values)
+        print(f"Their indices:", indices)
+
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
@@ -83,25 +118,21 @@ class HungarianMatcher(nn.Module):
         ]
         return [(torch.as_tensor(i, dtype=torch.int64), 
                 torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
-
-
+        
 
 class GroundingDINOVisualizer:
-    
     def __init__(self, save_dir, visualize_frequency=20):
-        
-        self.save_dir = save_dir 
+        self.save_dir = save_dir
         self.visualize_frequency = visualize_frequency
-        # Different colors for pred vs gt boxes
         self.pred_annotator = sv.BoxAnnotator(
-            color=sv.Color.green(), 
-            thickness=2,
+            color=sv.Color.red(),
+            thickness=8,
             text_scale=0.8,
             text_padding=3
         )
         self.gt_annotator = sv.BoxAnnotator(
-            color=sv.Color.red(),
-            thickness=4, 
+            color=sv.Color.green(),
+            thickness=2,
             text_scale=0.8,
             text_padding=3
         )
@@ -136,7 +167,7 @@ class GroundingDINOVisualizer:
                 phrases.append(f"{phrase} ({conf:.2f})")
             
         return phrases
-    
+
     def visualize_epoch(self, model, val_loader, epoch, prepare_data):
         model.eval()
         save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
@@ -145,11 +176,13 @@ class GroundingDINOVisualizer:
         with torch.no_grad():
             for idx, batch in enumerate(val_loader):
                 images, targets, captions = prepare_data(batch)
-                # Process first image
-                img = targets[0]["image_source"]
-                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                h, w, _ = img.shape
                 outputs = model(images, captions=captions)
+
+                img = targets[0]["image_source"]
+                h, w, _ = img.shape
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+                # Get predictions & filter by confidence
                 pred_logits = outputs["pred_logits"][0].cpu().sigmoid()
                 pred_boxes = outputs["pred_boxes"][0].cpu()
                 
@@ -327,7 +360,7 @@ class GroundingDINOTrainer:
             bbox_cost=self.bbox_loss_coef,
             giou_cost=self.giou_loss_coef
         )
-        indices = matcher(outputs, targets)
+        indices = matcher(outputs, targets,captions,self.model.tokenizer)
         
         for idx, ((pred_idx, tgt_idx), target) in enumerate(zip(indices, targets)):
             # Get predictions
@@ -468,7 +501,7 @@ def train(
                 'losses': avg_losses,
             }
             save_path = os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth')
-            torch.save(checkpoint, save_path)
+            #torch.save(checkpoint, save_path)
             print(f"Saved checkpoint to {save_path}")
             
 
