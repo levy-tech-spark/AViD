@@ -25,8 +25,10 @@ def box_cxcywh_to_xyxy(boxes):
     return box_convert(boxes, in_fmt='cxcywh', out_fmt='xyxy')
 
 
+
+
 class HungarianMatcher(nn.Module):
-    def __init__(self, class_cost: float = 2, bbox_cost: float = 5, giou_cost: float = 2):
+    def __init__(self, class_cost: float = 2, bbox_cost: float = 3, giou_cost: float = 2):
         super().__init__()
         self.class_cost = class_cost
         self.bbox_cost = bbox_cost 
@@ -77,7 +79,6 @@ class HungarianMatcher(nn.Module):
             cost_class = -torch.mm(pred_logits, text_embeddings.transpose(0, 1))
         else:
             #cost_class = torch.zeros_like(cost_bbox)
-            # Process all targets together
             all_positive_maps = []
             for idx, target in enumerate(targets):
                 # Create positive map using target phrases and full caption
@@ -90,12 +91,26 @@ class HungarianMatcher(nn.Module):
             
             positive_maps = torch.cat(all_positive_maps, dim=0).to(pred_probs.dtype)  # [total_targets, num_tokens] 
             # Compute similarity for all queries against all targets at once
-
             cost_class = -(pred_probs @ positive_maps.t()) # [bs*num_queries, total_targets]
             
             # Normalize by number of positive tokens per target
             cost_class = cost_class / (positive_maps.sum(dim=1) + 1e-8)
+            
+            #print(cost_class.argmin(dim=0))
 
+        #print(cost_class.min(),cost_class.max())
+        #print(cost_bbox.min(),cost_bbox.max())#
+        #print(cost_giou.min(),cost_giou.max())
+        
+        #k = 10  # or whatever number you want
+        #values, indices = cost_bbox[:,2].topk(k=k, dim=0, largest=False)  # largest=False for smallest values
+        #print(f"Top {k} smallest bbox costs indices:", indices)
+        #print(f"Their values:", values)
+
+        #values, indices = cost_giou[:,2].topk(k=k, dim=0, largest=False)
+        #print(f"Top {k} smallest giou costs indices:", indices)
+        #print(f"Their values:", values)
+        
         # Final cost matrix
         C = (
             self.bbox_cost * cost_bbox +
@@ -104,10 +119,10 @@ class HungarianMatcher(nn.Module):
             giou_cost * cost_giou
         )
         
-        k = 5  
-        values, indices = torch.topk(C[:,1], k=k, largest=False)  # False for smallest values
-        print(f"Top {k} smallest values:", values)
-        print(f"Their indices:", indices)
+        #k = 5  
+        #values, indices = torch.topk(C[:,1], k=k, largest=False)  # False for smallest values
+        #print(f"Top {k} smallest values:", values)
+        #print(f"Their indices:", indices)
 
         C = C.view(bs, num_queries, -1).cpu()
 
@@ -365,7 +380,7 @@ class GroundingDINOTrainer:
         for idx, ((pred_idx, tgt_idx), target) in enumerate(zip(indices, targets)):
             # Get predictions
             pred_boxes = outputs["pred_boxes"][idx][pred_idx]  # [num_matched, 4]
-            pred_logits = outputs["pred_logits"][idx]  # [num_queries, max_text_len]
+            pred_logits = outputs["pred_logits"][idx][pred_idx]  # [num_matched, max_text_len]
             # Below is same as valid tokens since we have preds logits of shape 900x 256 but if only something like 8 first tokens are valid in out input
             ## rest will be pred as -inf
             valid_mask = ~torch.isinf(pred_logits)
@@ -389,7 +404,7 @@ class GroundingDINOTrainer:
             num_queries = pred_logits.shape[0]
             
             # Initialize target tensor - zeros for all queries
-            target_labels = torch.zeros_like(pred_logits)  # [num_queries, max_text_len]
+            target_labels = torch.zeros_like(pred_logits)  # [num_matched, max_text_len]
             # Create positive map for the text tokens
             positive_map = create_positive_map_from_phrases(
                 target['phrases'],
@@ -398,7 +413,7 @@ class GroundingDINOTrainer:
             )  # [num_gt, num_tokens]
 
             # For matched pairs, assign corresponding positive map rows
-            for i, j in zip(pred_idx, tgt_idx):
+            for i, j in enumerate(tgt_idx):
                 target_labels[i, :positive_map.shape[1]] = positive_map[j]
 
             # Use their sigmoid_focal_loss
@@ -446,7 +461,7 @@ class GroundingDINOTrainer:
 def train(
     model,
     data_dict,
-    num_epochs=10,
+    num_epochs=100,
     batch_size=1,
     learning_rate=1e-4,
     save_dir='weights',
