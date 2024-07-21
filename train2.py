@@ -15,6 +15,9 @@ import torch.nn as nn
 import supervision as sv
 from groundingdino.models.GroundingDINO.utils import sigmoid_focal_loss
 
+# Ignore tokenizer warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 def box_xyxy_to_cxcywh(boxes):
     """Convert boxes from xyxy to cxcywh format"""
@@ -25,9 +28,8 @@ def box_cxcywh_to_xyxy(boxes):
     return box_convert(boxes, in_fmt='cxcywh', out_fmt='xyxy')
 
 
-
-
 class HungarianMatcher(nn.Module):
+    
     def __init__(self, class_cost: float = 2, bbox_cost: float = 3, giou_cost: float = 2):
         super().__init__()
         self.class_cost = class_cost
@@ -79,23 +81,63 @@ class HungarianMatcher(nn.Module):
             cost_class = -torch.mm(pred_logits, text_embeddings.transpose(0, 1))
         else:
             #cost_class = torch.zeros_like(cost_bbox)
+            # First tokenize all captions to get max length
+            tokenized_captions = []
+            max_length = 0
+            for caption in captions:
+                tokens = tokenizer(
+                    caption, 
+                    return_tensors="pt",
+                    padding=False,  # Don't pad individual captions yet
+                    truncation=True
+                ).to(pred_logits.device)
+                tokenized_captions.append(tokens)
+                max_length = max(max_length, tokens.input_ids.shape[1])
+                
             all_positive_maps = []
-            for idx, target in enumerate(targets):
-                # Create positive map using target phrases and full caption
-                positive_map = create_positive_map_from_phrases(
-                    target['phrases'],  # The labels/phrases we want to match
-                    tokenizer(captions[idx], return_tensors="pt").to(pred_logits.device),  # Full text caption
-                    tokenizer
-                )  # [num_targets, num_tokens]
-                all_positive_maps.append(positive_map)
+            total_targets = sum(len(t['phrases']) for t in targets)
             
-            positive_maps = torch.cat(all_positive_maps, dim=0).to(pred_probs.dtype)  # [total_targets, num_tokens] 
-            # Compute similarity for all queries against all targets at once
-            cost_class = -(pred_probs @ positive_maps.t()) # [bs*num_queries, total_targets]
+            # Now create positive maps with consistent dimensions
+            for idx, (target, tokens) in enumerate(zip(targets, tokenized_captions)):
+                # Pad this caption's tokens to max_length
+                curr_length = tokens.input_ids.shape[1]
+                if curr_length < max_length:
+                    padding = torch.full(
+                        (1, max_length - curr_length),
+                        tokenizer.pad_token_id,
+                        dtype=tokens.input_ids.dtype,
+                        device=tokens.input_ids.device
+                    )
+                    tokens.input_ids = torch.cat([tokens.input_ids, padding], dim=1)
+                
+                positive_map = create_positive_map_from_phrases(
+                    target['phrases'],
+                    tokens,
+                    tokenizer,
+                    max_length=max_length
+                )  # [num_phrases, max_length]
+                all_positive_maps.append(positive_map)
+                
+            positive_maps = torch.cat(all_positive_maps, dim=0).to(pred_probs.dtype).to(pred_probs)  # [total_targets, max_length]
+            
+            # Make sure pred_probs matches the token dimension
+            if pred_probs.shape[1] != max_length:
+                # Zero-pad or truncate pred_probs to match
+                new_pred_probs = torch.zeros(
+                    pred_probs.shape[0], 
+                    max_length, 
+                    device=pred_probs.device,
+                    dtype=pred_probs.dtype
+                )
+                min_length = min(pred_probs.shape[1], max_length)
+                new_pred_probs[:, :min_length] = pred_probs[:, :min_length]
+                pred_probs = new_pred_probs
+            
+            # Now compute cost_class with matched dimensions
+            cost_class = -(pred_probs @ positive_maps.t())  # [bs*num_queries, total_targets]
             
             # Normalize by number of positive tokens per target
             cost_class = cost_class / (positive_maps.sum(dim=1) + 1e-8)
-            
             #print(cost_class.argmin(dim=0))
 
         #print(cost_class.min(),cost_class.max())
@@ -240,30 +282,47 @@ class GroundingDINOVisualizer:
                     break
 
 
-def create_positive_map_from_phrases(phrases, tokenized, tokenizer):
+def create_positive_map_from_phrases(phrases, tokenized, tokenizer, max_length=None):
     """Create positive map between boxes and text tokens"""
-    # Get token ids for full text
-    token_ids = tokenized.input_ids[0]  # [num_tokens]
-    positive_map = torch.zeros(len(phrases), len(token_ids), dtype=torch.bool, 
-                            device=token_ids.device)
+    # Get token IDs and handle padding if needed
+    token_ids = tokenized.input_ids[0]  # [seq_len]
+    curr_length = token_ids.shape[0]
+    
+    if max_length is not None and curr_length < max_length:
+        # Pad token_ids to max_length
+        padding = torch.full(
+            (max_length - curr_length,),
+            tokenizer.pad_token_id,
+            dtype=token_ids.dtype,
+            device=token_ids.device
+        )
+        token_ids = torch.cat([token_ids, padding])
+    
+    # Initialize positive map
+    positive_map = torch.zeros(
+        len(phrases), 
+        len(token_ids), 
+        dtype=torch.bool,
+        device=token_ids.device
+    )
     
     for i, phrase in enumerate(phrases):
-        # Tokenize individual phrase - no special tokens
+        # Tokenize individual phrase
         phrase_tokens = tokenizer(
-            phrase, 
-            add_special_tokens=False, 
+            phrase,
+            add_special_tokens=False,
             return_tensors="pt"
-        ).input_ids[0]
+        ).input_ids[0].to(token_ids.device)
         
-        # Find matching span in full text
         phrase_len = len(phrase_tokens)
+        
+        # Find matching span in token_ids
         for j in range(len(token_ids) - phrase_len + 1):
-            if token_ids[j:j+phrase_len].tolist() == phrase_tokens.tolist():
+            if torch.equal(token_ids[j:j+phrase_len], phrase_tokens):
                 positive_map[i, j:j+phrase_len] = True
                 break
                 
     return positive_map
-
 
 class GroundingDINODataset(Dataset):
     def __init__(self, img_dir, ann_file):
@@ -462,8 +521,8 @@ def train(
     model,
     data_dict,
     num_epochs=100,
-    batch_size=1,
-    learning_rate=1e-4,
+    batch_size=2,
+    learning_rate=1e-5,
     save_dir='weights',
     save_frequency=1
 ):
@@ -480,6 +539,14 @@ def train(
         collate_fn=lambda x: tuple(zip(*x)) 
     )
     
+    val_loader = DataLoader(
+        train_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=1,
+        collate_fn=lambda x: tuple(zip(*x)) 
+    )
+    
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     trainer = GroundingDINOTrainer(model, optimizer)
     visualizer = GroundingDINOVisualizer(save_dir="visualizations")
@@ -487,7 +554,7 @@ def train(
     for epoch in range(num_epochs):
         
         ## Do visualization on val dataset passed as input loop through it
-        visualizer.visualize_epoch(model, train_loader, epoch, trainer.prepare_batch)
+        visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch)
         
         epoch_losses = defaultdict(list)
         
