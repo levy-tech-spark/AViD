@@ -257,9 +257,7 @@ class GroundingDINO(nn.Module):
         #decoded=self.tokenizer.decode(tokenized['input_ids'].cpu().numpy().tolist()[0])
 
         if text_self_attention_masks.shape[1] > self.max_text_len:
-            text_self_attention_masks = text_self_attention_masks[
-                :, : self.max_text_len, : self.max_text_len
-            ]
+            text_self_attention_masks = text_self_attention_masks[:, : self.max_text_len, : self.max_text_len]
             position_ids = position_ids[:, : self.max_text_len]
             tokenized["input_ids"] = tokenized["input_ids"][:, : self.max_text_len]
             tokenized["attention_mask"] = tokenized["attention_mask"][:, : self.max_text_len]
@@ -347,6 +345,13 @@ class GroundingDINO(nn.Module):
             ]
         )
         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord_list[-1]}
+
+        _, txt_len = text_dict['text_token_mask'].shape
+        ## Only valid text is the one given by tokenizer rest of it should be false for logits
+        out['text_mask'] = F.pad(text_dict['text_token_mask'],(0, self.max_text_len - txt_len),
+        mode='constant',
+        value=False)
+        out['tokenized']=tokenized
 
         # # for intermediate outputs
         # if self.aux_loss:

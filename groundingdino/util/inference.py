@@ -15,7 +15,7 @@ from groundingdino.models import build_model
 from groundingdino.util.misc import clean_state_dict
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import get_phrases_from_posmap
-from groundingdino.util.focal_loss import FocalLoss
+from groundingdino.util.class_loss import FocalLoss
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
