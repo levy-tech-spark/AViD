@@ -12,7 +12,6 @@ from torchvision.ops import generalized_box_iou
 import torch.nn as nn
 import supervision as sv
 from groundingdino.util.class_loss import BCEWithLogitsLoss,MultilabelFocalLoss,FocalLoss
-from transformers import get_cosine_schedule_with_warmup
 from ema_pytorch import EMA
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 from groundingdino.util.vl_utils import build_captions_and_token_span
@@ -27,7 +26,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 class SetCriterion(nn.Module):
     
-    def __init__(self, num_classes, matcher, eos_coef, losses,loss_type= 'bce'):
+    def __init__(self, num_classes, matcher, eos_coef, losses,loss_type= 'focal'):
         super().__init__()
         self.num_classes = num_classes
         self.matcher = matcher
@@ -222,7 +221,7 @@ class SetCriterion(nn.Module):
 
 @torch.no_grad()
 class GroundingDINOVisualizer:
-    def __init__(self, save_dir, visualize_frequency=20):
+    def __init__(self, save_dir, visualize_frequency=50):
         self.save_dir = save_dir
         self.visualize_frequency = visualize_frequency
         self.pred_annotator = sv.BoxAnnotator(
@@ -405,17 +404,17 @@ class GroundingDINOTrainer:
         model,
         device="cuda",
         ema_decay=0.999,
-        ema_update_after_step=500,
+        ema_update_after_step=150,
         ema_update_every=20,
         warmup_epochs=5,
-        class_loss_coef=4.0,
+        class_loss_coef=1.0,
         bbox_loss_coef=5.0,  
-        giou_loss_coef=2.0,  
+        giou_loss_coef=1.0,  
         learning_rate=2e-4,   
         use_ema=False,      
         num_epochs=500,
         num_steps_per_epoch=None,
-        lr_scheduler="step",
+        lr_scheduler="onecycle",
         eos_coef=0.1,
         max_txt_len=256
     ):
@@ -469,7 +468,7 @@ class GroundingDINOTrainer:
                 update_every=ema_update_every
             )
 
-        self.matcher=build_matcher(set_cost_class=class_loss_coef,
+        self.matcher=build_matcher(set_cost_class=class_loss_coef*2,
             set_cost_bbox=bbox_loss_coef,
             set_cost_giou=giou_loss_coef)
         
@@ -573,11 +572,11 @@ class GroundingDINOTrainer:
 def train(
     model,
     data_dict,
-    num_epochs=500,
-    batch_size=4,
+    num_epochs=200,
+    batch_size=2,
     learning_rate=1e-4,
     save_dir='weights',
-    save_frequency=1,
+    save_frequency=5,
     warmup_epochs=5,
 ):
     
@@ -585,17 +584,22 @@ def train(
         data_dict['train_dir'],
         data_dict['train_ann']
     )
+
+    val_dataset = GroundingDINODataset(
+        data_dict['val_dir'],
+        data_dict['val_ann']
+    )
     
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=8,
         collate_fn=lambda x: tuple(zip(*x)) 
     )
     
     val_loader = DataLoader(
-        train_dataset,
+        val_dataset,
         batch_size=1,
         shuffle=False,
         num_workers=1,
@@ -626,17 +630,6 @@ def train(
         
         for batch_idx, batch in enumerate(train_loader):
             
-            
-            #progress = epoch / num_epochs
-            # Dynamic loss weighting
-            
-            #trainer.weights_dict_loss = {
-            #    'loss_ce': trainer.weights_dict_loss['loss_ce'] * (1 - 0.1 * progress),
-            #    'loss_bbox': trainer.weights_dict_loss['loss_bbox'] * (1 + 0.1 * progress),
-            #    'loss_giou': trainer.weights_dict_loss['loss_giou'] * (1 + 0.2 * progress)
-            #}
-            
-            
             losses = trainer.train_step(batch)
             
             # Record losses
@@ -647,7 +640,6 @@ def train(
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
                 print(f"Learning rate: {trainer.optimizer.param_groups[0]['lr']:.6f}")
-            #break
             
         
         # Compute epoch averages
@@ -655,12 +647,18 @@ def train(
         print(f"Epoch {epoch+1} complete. Average losses:", ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
 
         if (epoch + 1) % save_frequency == 0:
-            continue
+            #continue
             trainer.save_checkpoint(
                 os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'),
                 epoch,
                 avg_losses
             )
+            #trainer.save_checkpoint(
+            #    os.path.join(save_dir, f'checkpoint.pth'),
+            #    epoch,
+            #    avg_losses
+            #)
+            
 
 
 
@@ -668,7 +666,7 @@ if __name__ == "__main__":
     
     data_dict = {
         'train_dir': "multimodal-data/fashion_dataset_subset/images/train",
-        'train_ann': "multimodal-data/fashion_dataset_subset/train_annotations2.csv",
+        'train_ann': "multimodal-data/fashion_dataset_subset/train_annotations.csv",
         'val_dir': "multimodal-data/fashion_dataset_subset/images/val",
         'val_ann': "multimodal-data/fashion_dataset_subset/val_annotations.csv"
     }

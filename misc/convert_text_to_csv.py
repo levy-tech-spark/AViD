@@ -1,8 +1,8 @@
 import pandas as pd
 
 # Load the file
-file_path = '/home/levy/dev/Adaptive-Vision-Language-Detector/multimodal-data/fashion_dataset_subset/train_annotations.csv'  # Replace with the actual file path
-output_csv = '/home/levy/dev/Adaptive-Vision-Language-Detector/multimodal-data/fashion_dataset_subset/train_annotations2.csv'
+file_path = '/home/levy/Adaptive-Vision-Language-Detector/multimodal-data/fashion_dataset_subset/val_annotations.csv'  # Replace with the actual file path
+output_csv = '/home/levy/Adaptive-Vision-Language-Detector/multimodal-data/fashion_dataset_subset/val_annotations2.csv'
 
 # Define column names for the structured data
 columns = ['label_name', 'bbox_x', 'bbox_y', 'bbox_width', 'bbox_height', 'image_name', 'width', 'height']
