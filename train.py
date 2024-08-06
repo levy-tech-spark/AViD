@@ -19,6 +19,7 @@ from typing import Dict, NamedTuple
 from model_utils import freeze_model_layers,print_frozen_status
 from torch.optim.lr_scheduler import OneCycleLR
 from matchers import build_matcher
+from groundingdino.util.inference import GroundingDINOVisualizer
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -217,118 +218,6 @@ class SetCriterion(nn.Module):
                     losses.update(l_dict)
 
         return losses
-
-
-@torch.no_grad()
-class GroundingDINOVisualizer:
-    def __init__(self, save_dir, visualize_frequency=50):
-        self.save_dir = save_dir
-        self.visualize_frequency = visualize_frequency
-        self.pred_annotator = sv.BoxAnnotator(
-            color=sv.Color.red(),
-            thickness=8,
-            text_scale=0.8,
-            text_padding=3
-        )
-        self.gt_annotator = sv.BoxAnnotator(
-            color=sv.Color.green(),
-            thickness=2,
-            text_scale=0.8,
-            text_padding=3
-        )
-
-    def extract_phrases(self, logits, tokenized, tokenizer, text_threshold=0.2):
-        """Extract phrases from logits using tokenizer
-        Args:
-            logits (torch.Tensor): Prediction logits [num_queries, seq_len]
-            tokenized: Tokenized text output
-            tokenizer: Model tokenizer
-            text_threshold: Confidence threshold for token selection
-        """
-        phrases = []
-        token_ids = tokenized.input_ids[0]
-        
-        for logit in logits:
-            # Create mask for tokens above threshold
-            text_mask = logit > text_threshold
-            
-            # Find valid token positions
-            valid_tokens = []
-            for idx, (token_id, mask) in enumerate(zip(token_ids, text_mask)):
-                # Skip special tokens
-                if token_id in [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id]:
-                    continue
-                if mask:
-                    valid_tokens.append(token_id.item())
-            
-            if valid_tokens:
-                phrase = tokenizer.decode(valid_tokens)
-                conf = logit.max().item()
-                phrases.append(f"{phrase} ({conf:.2f})")
-            
-        return phrases
-    
-
-    def visualize_epoch(self, model, val_loader, epoch, prepare_data):
-        model.eval()
-        save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
-        os.makedirs(save_dir, exist_ok=True)
-
-        with torch.no_grad():
-            for idx, batch in enumerate(val_loader):
-                images, targets, captions= prepare_data(batch)
-                outputs = model(images, captions=captions)
-
-                img = targets[0]["orig_img"]
-                h, w, _ = img.shape
-                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-                # Get predictions & filter by confidence
-                pred_logits = outputs["pred_logits"][0].cpu().sigmoid()
-                pred_boxes = outputs["pred_boxes"][0].cpu()
-                
-                # Filter confident predictions
-                scores = pred_logits.max(dim=1)[0]
-                mask = scores > 0.3  # Box threshold
-
-                #indices = torch.nonzero(mask, as_tuple=True)[0]
-                # Print indices
-                #print("Visualization indices are :", indices)
-                
-                filtered_boxes = pred_boxes[mask]
-                filtered_logits = pred_logits[mask]
-
-                # Get phrase predictions
-                tokenized = outputs['tokenized']
-                phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer)
-
-                # Draw predictions
-                if len(filtered_boxes):
-                    boxes = filtered_boxes * torch.tensor([w, h, w, h])
-                    xyxy = box_cxcywh_to_xyxy(boxes).numpy()
-                    
-                    detections = sv.Detections(xyxy=xyxy)
-                    img_bgr = self.pred_annotator.annotate(
-                        scene=img_bgr,
-                        detections=detections,
-                        labels=phrases
-                    )
-
-                # Draw ground truth
-                if "boxes" in targets[0]:
-                    gt_xyxy = box_cxcywh_to_xyxy(targets[0]["boxes"]).cpu().numpy()
-                    gt_detections = sv.Detections(xyxy=gt_xyxy)
-                    img_bgr = self.gt_annotator.annotate(
-                        scene=img_bgr,
-                        detections=gt_detections,
-                        labels=targets[0].get("str_cls_lst", None)
-                    )
-
-                cv2.imwrite(f"{save_dir}/val_pred_{idx}.jpg", img_bgr)
-                #break
-                if idx >= self.visualize_frequency:
-                    break
-
 
 class GroundingDINODataset(Dataset):
     def __init__(self, img_dir, ann_file, transforms=None):
@@ -659,9 +548,6 @@ def train(
             #    avg_losses
             #)
             
-
-
-
 if __name__ == "__main__":
     
     data_dict = {

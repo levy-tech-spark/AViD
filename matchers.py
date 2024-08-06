@@ -1,26 +1,10 @@
-import os
-import cv2
-import csv
-from collections import defaultdict
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from groundingdino.util.train import load_model, load_image
 from torchvision.ops import generalized_box_iou  
-from groundingdino.util.misc import nested_tensor_from_tensor_list
 from torchvision.ops import generalized_box_iou
 from scipy.optimize import linear_sum_assignment
 import torch.nn as nn
-import supervision as sv
-from groundingdino.util.class_loss import BCEWithLogitsLoss,MultilabelFocalLoss
-from transformers import get_cosine_schedule_with_warmup
-from ema_pytorch import EMA
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
-from groundingdino.util.vl_utils import build_captions_and_token_span,create_positive_map_from_span
-from typing import Dict, NamedTuple
-from model_utils import freeze_model_layers,print_frozen_status
-from torch.optim.lr_scheduler import OneCycleLR
-
+from groundingdino.util.vl_utils import create_positive_map_from_span
 
 class HungarianMatcher(nn.Module):
     """This class computes an assignment between the targets and the predictions of the network

@@ -61,5 +61,4 @@ def process_image(
 
 if __name__ == "__main__":
     model_weights="weights/groundingdino_swint_ogc.pth"
-    #model_weights="weights/model_weights2000.pth"
     process_image(model_weights=model_weights)

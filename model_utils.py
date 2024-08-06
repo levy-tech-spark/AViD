@@ -1,24 +1,5 @@
-from typing import Optional, List
-import torch.nn as nn
-import os
-import cv2
-import csv
-from collections import defaultdict
+
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from groundingdino.util.train import load_model, load_image,train_image, annotate
-from torchvision.ops import box_convert  
-from torchvision.ops import generalized_box_iou  
-from groundingdino.util.misc import nested_tensor_from_tensor_list
-from torchvision.ops import box_iou, generalized_box_iou
-from scipy.optimize import linear_sum_assignment
-import torch.nn as nn
-import supervision as sv
-from groundingdino.models.GroundingDINO.utils import sigmoid_focal_loss
-from transformers import get_cosine_schedule_with_warmup
-from ema_pytorch import EMA
-from typing import List, Dict
 
 def freeze_model_layers(model, freeze_config=None) -> None:
     """
