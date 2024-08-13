@@ -16,10 +16,11 @@ from ema_pytorch import EMA
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 from groundingdino.util.vl_utils import build_captions_and_token_span
 from typing import Dict, NamedTuple
-from model_utils import freeze_model_layers,print_frozen_status
+from groundingdino.util.model_utils import freeze_model_layers,print_frozen_status
 from torch.optim.lr_scheduler import OneCycleLR
 from matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
+from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -82,7 +83,7 @@ class SetCriterion(nn.Module):
             device=device
         )
 
-    def loss_labels(self, outputs, targets, indices, log=True, **kwargs):
+    def loss_labels(self, outputs, targets, indices, log=False, **kwargs):
         """Compute the classification loss"""
         assert 'pred_logits' in outputs
         
@@ -132,8 +133,8 @@ class SetCriterion(nn.Module):
                 token_acc = background_acc = torch.tensor(0.0, device=processed.device)
                 
             return {
-                'Token_Accuracy': token_acc,
-                'Background_Accuracy': background_acc
+                'Matched_Token_Accuracy': token_acc,
+                'UnMatched_Token_Accuracy': background_acc
             }
 
     def loss_boxes(self, outputs, targets, indices, **kwargs):
