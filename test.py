@@ -4,7 +4,7 @@ import torch
 import torchvision.ops as ops
 import os
 from torchvision.ops import box_convert
-
+from groundingdino.util.inference import GroundingDINOVisualizer
 
 def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
     h, w, _ = image_source.shape
@@ -32,31 +32,31 @@ def process_image(
         model_config="groundingdino/config/GroundingDINO_SwinT_OGC.py",
         model_weights="weights/groundingdino_swint_ogc.pth",
         image_path="multimodal-data/fashion_dataset_subset/images/val/val_000004.jpg",
-        text_prompt="shirt.bag.pants",
+        text_prompt="shirt .bag .pants",
         box_threshold=0.35,
         text_threshold=0.25
 ):
     model = load_model(model_config, model_weights)
-    #model.load_state_dict(torch.load(state_dict_path))
-    
+    visualizer = GroundingDINOVisualizer(save_dir="visualizations")
+
     for img in os.listdir('multimodal-data/fashion_dataset_subset/images/val'):
         image_path=os.path.join('multimodal-data/fashion_dataset_subset/images/val',img)
         image_source, image = load_image(image_path)
+        visualizer.visualize_image()
 
-        boxes, logits, phrases = predict(
-            model=model,
-            image=image,
-            caption=text_prompt,
-            box_threshold=box_threshold,
-            text_threshold=text_threshold
-        )
-        print(f"Original boxes size {boxes.shape}")
+        #boxes, logits, phrases = predict(
+        #    model=model,
+        #    image=image,
+        #    caption=text_prompt,
+        #    box_threshold=box_threshold,
+        #    text_threshold=text_threshold
+        #)
+        #print(f"Original boxes size {boxes.shape}")
         #if boxes.shape[0]>0:
         #    boxes, logits, phrases = apply_nms_per_phrase(image_source, boxes, logits, phrases)
         #    print(f"NMS boxes size {boxes.shape}")
-
-        annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
-        cv2.imwrite(f"vis_Dataset/{img}", annotated_frame)
+        #annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
+        #cv2.imwrite(f"vis_Dataset/{img}", annotated_frame)
 
 
 if __name__ == "__main__":

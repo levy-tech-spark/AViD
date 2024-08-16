@@ -165,6 +165,55 @@ class GroundingDINOVisualizer:
                 if idx >= self.visualize_frequency:
                     break
 
+
+    def visualize_image(self, model, image, caption,image_source,fname,device="cuda"):
+        model.eval()
+        save_dir = os.path.join(self.save_dir, f'inference')
+        os.makedirs(save_dir, exist_ok=True)
+
+        with torch.no_grad():          
+            caption = preprocess_caption(caption=caption)
+            model = model.to(device)
+            image = image.to(device)
+            outputs = model(image[None], captions=[caption])
+
+            ## Original source image
+            img = image_source
+            h, w, _ = image_source.shape
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+            # Get predictions & filter by confidence
+            pred_logits = outputs["pred_logits"][0].cpu().sigmoid()
+            pred_boxes = outputs["pred_boxes"][0].cpu()
+            
+            # Filter confident predictions
+            scores = pred_logits.max(dim=1)[0]
+            mask = scores > 0.3  # Box threshold
+
+            filtered_boxes = pred_boxes[mask]
+            filtered_logits = pred_logits[mask]
+
+            # Get phrase predictions
+            tokenized = outputs['tokenized']
+            phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer)
+
+            # Draw predictions
+            if len(filtered_boxes):
+                boxes = filtered_boxes * torch.tensor([w, h, w, h])
+                xyxy = box_cxcywh_to_xyxy(boxes).numpy()
+                
+                detections = sv.Detections(xyxy=xyxy)
+                img_bgr = self.pred_annotator.annotate(
+                    scene=img_bgr,
+                    detections=detections,
+                    labels=phrases
+                )
+                cv2.imwrite(f"{save_dir}/{fname}.jpg", img_bgr)
+            else:
+                print(f"No boxes found for the image above given thresholds!")
+
+
+
 def predict(
         model,
         image: torch.Tensor,
