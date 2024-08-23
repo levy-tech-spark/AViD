@@ -42,7 +42,7 @@ def process_image(
     for img in os.listdir('multimodal-data/fashion_dataset_subset/images/val'):
         image_path=os.path.join('multimodal-data/fashion_dataset_subset/images/val',img)
         image_source, image = load_image(image_path)
-        visualizer.visualize_image()
+        visualizer.visualize_image(model,image,text_prompt,image_source,img)
 
         #boxes, logits, phrases = predict(
         #    model=model,
