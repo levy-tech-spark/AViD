@@ -1,5 +1,5 @@
-#torch
-#torchvision
+torch
+torchvision
 transformers
 addict
 yapf
@@ -10,5 +10,4 @@ supervision==0.6.0
 pycocotools
 ema_pytorch
 scipy
-visualizations/
-#setuptools==65.5.1 
+setuptools==65.5.1 
