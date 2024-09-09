@@ -22,6 +22,8 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.ops.boxes import nms
 from transformers import AutoTokenizer, BertModel, BertTokenizer, RobertaModel, RobertaTokenizerFast
+from peft import LoraConfig
+from peft.utils import get_peft_model_state_dict,get_peft_model
 
 from groundingdino.util import box_ops, get_tokenlizer
 from groundingdino.util.misc import (
@@ -74,6 +76,8 @@ class GroundingDINO(nn.Module):
         text_encoder_type="bert-base-uncased",
         sub_sentence_present=True,
         max_text_len=256,
+        use_lora=True,
+        lora_rank=8
     ):
         """Initializes the model.
         Parameters:
@@ -113,7 +117,10 @@ class GroundingDINO(nn.Module):
         self.feat_map = nn.Linear(self.bert.config.hidden_size, self.hidden_dim, bias=True)
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
-        # freeze
+        
+        # Set up lora
+        if use_lora:
+            self.setup_lora(lora_rank)
 
         # special tokens
         self.specical_tokens = self.tokenizer.convert_tokens_to_ids(["[CLS]", "[SEP]", ".", "?"])
@@ -199,6 +206,34 @@ class GroundingDINO(nn.Module):
             self.refpoint_embed = None
 
         self._reset_parameters()
+    
+    def setup_lora(self, rank):
+        # Configure LoRA
+        lora_config = LoraConfig(
+            r=rank,
+            lora_alpha=rank,
+            target_modules=[
+                "self_attn.q_proj",
+                "self_attn.k_proj", 
+                "self_attn.v_proj",
+                "bbox_embed.layers.2",
+                "class_embed.layers.2"
+            ],
+            lora_dropout=0.1
+        )
+        
+        # Add LoRA to transformer
+        if hasattr(self.transformer, "encoder"):
+            self.transformer.encoder = get_peft_model(self.transformer.encoder, lora_config)
+        if hasattr(self.transformer, "decoder"):
+            self.transformer.decoder = get_peft_model(self.transformer.decoder, lora_config)
+            
+        # Add LoRA to prediction heads
+        self.bbox_embed = get_peft_model(self.bbox_embed, lora_config)
+        self.class_embed = get_peft_model(self.class_embed, lora_config)
+        
+        # Freeze base model weights
+        self.freeze_base_model()
 
     def _reset_parameters(self):
         # init input_proj
