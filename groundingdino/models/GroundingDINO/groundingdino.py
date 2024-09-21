@@ -22,8 +22,7 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.ops.boxes import nms
 from transformers import AutoTokenizer, BertModel, BertTokenizer, RobertaModel, RobertaTokenizerFast
-from peft import LoraConfig
-from peft.utils import get_peft_model_state_dict,get_peft_model
+from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
 
 from groundingdino.util import box_ops, get_tokenlizer
 from groundingdino.util.misc import (
