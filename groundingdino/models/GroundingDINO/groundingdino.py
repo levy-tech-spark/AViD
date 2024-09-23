@@ -75,8 +75,6 @@ class GroundingDINO(nn.Module):
         text_encoder_type="bert-base-uncased",
         sub_sentence_present=True,
         max_text_len=256,
-        use_lora=True,
-        lora_rank=8
     ):
         """Initializes the model.
         Parameters:
@@ -117,10 +115,6 @@ class GroundingDINO(nn.Module):
         nn.init.constant_(self.feat_map.bias.data, 0)
         nn.init.xavier_uniform_(self.feat_map.weight.data)
         
-        # Set up lora
-        if use_lora:
-            self.setup_lora(lora_rank)
-
         # special tokens
         self.specical_tokens = self.tokenizer.convert_tokens_to_ids(["[CLS]", "[SEP]", ".", "?"])
 
@@ -206,33 +200,6 @@ class GroundingDINO(nn.Module):
 
         self._reset_parameters()
     
-    def setup_lora(self, rank):
-        # Configure LoRA
-        lora_config = LoraConfig(
-            r=rank,
-            lora_alpha=rank,
-            target_modules=[
-                "self_attn.q_proj",
-                "self_attn.k_proj", 
-                "self_attn.v_proj",
-                "bbox_embed.layers.2",
-                "class_embed.layers.2"
-            ],
-            lora_dropout=0.1
-        )
-        
-        # Add LoRA to transformer
-        if hasattr(self.transformer, "encoder"):
-            self.transformer.encoder = get_peft_model(self.transformer.encoder, lora_config)
-        if hasattr(self.transformer, "decoder"):
-            self.transformer.decoder = get_peft_model(self.transformer.decoder, lora_config)
-            
-        # Add LoRA to prediction heads
-        self.bbox_embed = get_peft_model(self.bbox_embed, lora_config)
-        self.class_embed = get_peft_model(self.class_embed, lora_config)
-        
-        # Freeze base model weights
-        self.freeze_base_model()
 
     def _reset_parameters(self):
         # init input_proj
@@ -413,6 +380,77 @@ class GroundingDINO(nn.Module):
             for a, b in zip(outputs_class[:-1], outputs_coord[:-1])
         ]
 
+
+def add_lora_to_model(model, rank=8):
+    """
+    Adds LoRA to linear layers in Grounding DINO model
+    """
+    # List all linear layer names from model architecture
+    lora_config = LoraConfig(
+        r=rank,
+        lora_alpha=rank,
+        target_modules=[
+            # Transformer Encoder layers
+            "sampling_offsets",  # MultiScaleDeformableAttention
+            "attention_weights",
+            "value_proj",
+            "output_proj",
+            "linear1",  # FFN
+            "linear2",
+            "out_proj",  # MultiheadAttention
+            # Transformer Decoder layers
+            "sampling_offsets",  # MultiScaleDeformableAttention
+            "attention_weights",
+            "value_proj",
+            "output_proj",
+            "linear1",  # FFN
+            "linear2",
+            # BiMultiHeadAttention layers
+            "v_proj",
+            "l_proj",
+            "values_v_proj",
+            "values_l_proj",
+            "out_v_proj",
+            "out_l_proj",
+            # Query, Key, Value projections
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            # Other linear layers
+            "feat_map",
+            "query",
+            "key",
+            "value",
+            "dense"
+        ],
+        lora_dropout=0.1,
+        bias="none",
+    )
+
+    # Apply LoRA to entire model
+    print("Adding LoRA to model...")
+    model = get_peft_model(model, lora_config)
+    
+    # Freeze base model
+    print("\nFreezing base model parameters...")
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Unfreeze LoRA parameters
+    print("Unfreezing LoRA parameters...")
+    for n, p in model.named_parameters():
+        if 'lora_' in n:
+            p.requires_grad = True
+            print(f"Unfroze: {n}")
+
+    # Log stats
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\nLoRA Trainable params: {trainable_params} ({100 * trainable_params / total_params:.2f}% of total)")
+    
+    return model
+
+
 @MODULE_BUILD_FUNCS.registe_with_name(module_name="groundingdino")
 def build_groundingdino(args):
     # Image backbone
@@ -446,5 +484,7 @@ def build_groundingdino(args):
         max_text_len=args.max_text_len,
     )
 
+    print(model)
+    add_lora_to_model(model)
     return model
 
