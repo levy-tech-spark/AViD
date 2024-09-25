@@ -427,6 +427,30 @@ def add_lora_to_model(model, rank=8):
         bias="none",
     )
 
+
+    lora_config = LoraConfig(
+    r=rank,
+    lora_alpha=rank,
+    target_modules=[
+        # Box prediction related
+        "linear1",  # FFN in decoder
+        "linear2",
+        
+        # Cross-attention for text-image alignment
+        "out_proj",  # MultiheadAttention
+        
+        # Text feature processing
+        "feat_map",  # Text feature projection
+        
+        # Critical attention components
+        "value_proj",
+        "output_proj"
+    ],
+    lora_dropout=0.1,
+    bias="none",)
+
+    
+
     # Apply LoRA to entire model
     print("Adding LoRA to model...")
     model = get_peft_model(model, lora_config)
