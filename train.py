@@ -558,5 +558,5 @@ if __name__ == "__main__":
         'val_ann': "multimodal-data/fashion_dataset_subset/val_annotations.csv"
     }
     
-    model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth")
+    model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=True)
     train(model, data_dict)
