@@ -468,6 +468,7 @@ def train(
     save_dir='weights',
     save_frequency=5,
     warmup_epochs=5,
+    use_lora=False
 ):
     
     train_dataset = GroundingDINODataset(
@@ -506,7 +507,10 @@ def train(
     
     visualizer = GroundingDINOVisualizer(save_dir="visualizations")
     
-    freeze_model_layers(model)
+    # if we are using lora then it is takien care of while setting up lora
+    if not use_lora:
+       freeze_model_layers(model)
+    
     print_frozen_status(model)
 
     
@@ -557,6 +561,6 @@ if __name__ == "__main__":
         'val_dir': "multimodal-data/fashion_dataset_subset/images/val",
         'val_ann': "multimodal-data/fashion_dataset_subset/val_annotations.csv"
     }
-    
-    model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=True)
-    train(model, data_dict)
+    use_lora = True
+    model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=use_lora)
+    train(model, data_dict, use_lora)

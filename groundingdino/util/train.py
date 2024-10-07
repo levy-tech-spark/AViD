@@ -15,6 +15,7 @@ from groundingdino.models import build_model
 from groundingdino.util.misc import clean_state_dict
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import get_phrases_from_posmap
+from groundingdino.util.lora import add_lora_to_model
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
@@ -31,16 +32,18 @@ def preprocess_caption(caption: str) -> str:
     if result.endswith("."):
         return result
     return result + "."
+    
 
 
 def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda", use_lora: bool =False):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
-    args.use_lora = use_lora
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
     model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-    model.eval()
+    if use_lora:
+        add_lora_to_model(model)
+        print(f"Lora model is {model}")
     return model
 
 

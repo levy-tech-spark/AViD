@@ -31,13 +31,13 @@ def preprocess_caption(caption: str) -> str:
     return result + "."
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda",strict: bool =False):
+def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda",strict: bool =True):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
     if "model" in checkpoint.keys():
-        model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=strict)
+        model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     else:
         # The state dict is the checkpoint
         model.load_state_dict(clean_state_dict(checkpoint), strict=True)
