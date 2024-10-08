@@ -3,10 +3,9 @@ import torch.nn as nn
 from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
 
 
-
-def save_lora_weights(model, save_directory):
+def get_lora_weights(model):
     lora_state_dict = get_peft_model_state_dict(model)
-    torch.save(lora_state_dict, f"{save_directory}/lora_weights.pt")
+    return lora_state_dict
 
 def load_lora_weights(model, weights_path):
     lora_state_dict = torch.load(weights_path)

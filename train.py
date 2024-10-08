@@ -21,6 +21,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
+from groundingdino.util.lora import get_lora_weights
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -447,16 +448,24 @@ class GroundingDINOTrainer:
         """Return EMA model for evaluation"""
         return self.ema_model.ema_model
 
-    def save_checkpoint(self, path, epoch, losses):
-        """Save checkpoint with EMA and scheduler state"""
-        checkpoint = {
+    def save_checkpoint(self, path, epoch, losses, use_lora=False):
+        """Save checkpoint with EMA and scheduler state""" 
+        if use_lora:
+            checkpoint = {
             'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'ema_state_dict': self.ema_model.state_dict() if self.use_ema else None,
+            'model_state_dict': get_lora_weights(model),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
-            'losses': losses,
-        }
+            'losses': losses,}
+        else:
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'ema_state_dict': self.ema_model.state_dict() if self.use_ema else None,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+                'losses': losses,
+            }
         torch.save(checkpoint, path)
 
 def train(
@@ -513,7 +522,6 @@ def train(
     
     print_frozen_status(model)
 
-    
     for epoch in range(num_epochs):  
         ## Do visualization on val dataset passed as input loop through it
         ## visualize after every 5 epochs

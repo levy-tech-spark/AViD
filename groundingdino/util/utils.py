@@ -35,6 +35,16 @@ def clean_state_dict(state_dict):
     return new_state_dict
 
 
+# 3. Save LoRA weights
+def save_lora_weights(model, save_directory):
+    lora_state_dict = get_peft_model_state_dict(model)
+    torch.save(lora_state_dict, f"{save_directory}/lora_weights.pt")
+
+# 4. Load LoRA weights
+def load_lora_weights(model, weights_path):
+    lora_state_dict = torch.load(weights_path)
+    model.load_state_dict(lora_state_dict, strict=False)
+
 def renorm(
     img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
 ) -> torch.FloatTensor:
