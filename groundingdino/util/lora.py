@@ -4,7 +4,16 @@ from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
 
 
 def get_lora_weights(model):
-    lora_state_dict = get_peft_model_state_dict(model)
+    ## This needs lora config which is not part of grouding dino model state dict tight now hack to get lora weights
+    #lora_state_dict = get_peft_model_state_dict(model)
+    # Collect LoRA parameters manually
+    lora_state_dict = {}
+    for name, param in model.named_parameters():
+        if 'lora_' in name:
+            lora_state_dict[name] = param.data.cpu()
+    # If no LoRA weights found, print warning
+    if not lora_state_dict:
+        print("No LoRA weights found in the model.")
     return lora_state_dict
 
 def load_lora_weights(model, weights_path):

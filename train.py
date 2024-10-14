@@ -518,18 +518,18 @@ def train(
     
     # if we are using lora then it is takien care of while setting up lora
     if not use_lora:
+       print(f"Freezing most of model except few layers!! ")
        freeze_model_layers(model)
     
     print_frozen_status(model)
 
     for epoch in range(num_epochs):  
         ## Do visualization on val dataset passed as input loop through it
-        ## visualize after every 5 epochs
         if epoch % 5 == 0:
             visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch)
         
         epoch_losses = defaultdict(list)
-        
+
         for batch_idx, batch in enumerate(train_loader):
             
             losses = trainer.train_step(batch)
@@ -542,24 +542,20 @@ def train(
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
                 print(f"Learning rate: {trainer.optimizer.param_groups[0]['lr']:.6f}")
-            
+            break
         
-        # Compute epoch averages
+        
         avg_losses = {k: sum(v)/len(v) for k, v in epoch_losses.items()}
         print(f"Epoch {epoch+1} complete. Average losses:", ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
 
         if (epoch + 1) % save_frequency == 0:
-            #continue
             trainer.save_checkpoint(
                 os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'),
                 epoch,
-                avg_losses
+                avg_losses,
+                use_lora=use_lora
             )
-            #trainer.save_checkpoint(
-            #    os.path.join(save_dir, f'checkpoint.pth'),
-            #    epoch,
-            #    avg_losses
-            #)
+
             
 if __name__ == "__main__":
     
