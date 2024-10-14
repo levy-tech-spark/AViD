@@ -571,4 +571,4 @@ if __name__ == "__main__":
     }
     use_lora = True
     model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=use_lora)
-    train(model, data_dict, use_lora)
+    train(model, data_dict, use_lora=True)
