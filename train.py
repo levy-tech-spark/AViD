@@ -22,6 +22,7 @@ from matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
 from groundingdino.util.lora import get_lora_weights
+from datetime import datetime
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -473,13 +474,19 @@ def train(
     data_dict,
     num_epochs=200,
     batch_size=2,
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     save_dir='weights',
     save_frequency=5,
     warmup_epochs=5,
     use_lora=False
 ):
     
+
+    save_dir = os.path.join(save_dir, datetime.now().strftime("%Y%m%d_%H%M"))
+    
+    # Create directory
+    os.makedirs(save_dir, exist_ok=True)
+
     train_dataset = GroundingDINODataset(
         data_dict['train_dir'],
         data_dict['train_ann']
@@ -514,7 +521,7 @@ def train(
                                     warmup_epochs=warmup_epochs,
                                     learning_rate=learning_rate)
     
-    visualizer = GroundingDINOVisualizer(save_dir="visualizations")
+    visualizer = GroundingDINOVisualizer(save_dir=save_dir)
     
     # if we are using lora then it is takien care of while setting up lora
     if not use_lora:
@@ -565,6 +572,11 @@ if __name__ == "__main__":
         'val_dir': "multimodal-data/fashion_dataset_subset/images/val",
         'val_ann': "multimodal-data/fashion_dataset_subset/val_annotations.csv"
     }
-    use_lora = True
+    use_lora = False
     model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=use_lora)
-    train(model, data_dict, use_lora=True)
+    train(model, data_dict, use_lora=False) 
+
+
+##
+##Frozen Parameters: 172,972,294 (99.77%)
+##Trainable Parameters: 391,232 (0.23%)
