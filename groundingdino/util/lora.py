@@ -21,7 +21,7 @@ def load_lora_weights(model, weights_path):
     model.load_state_dict(lora_state_dict, strict=False)
 
 
-def add_lora_to_model(model, rank=8):
+def add_lora_to_model(model, rank=32):
     """
     Adds LoRA to linear layers in Grounding DINO model
     """

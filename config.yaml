@@ -1,0 +1,20 @@
+data:
+  train_dir: "multimodal-data/fashion_dataset_subset/images/train"
+  train_ann: "multimodal-data/fashion_dataset_subset/train_annotations.csv"
+  val_dir: "multimodal-data/fashion_dataset_subset/images/val"
+  val_ann: "multimodal-data/fashion_dataset_subset/val_annotations.csv"
+  batch_size: 4
+  num_workers: 8
+
+model:
+  config_path: "groundingdino/config/GroundingDINO_SwinT_OGC.py"
+  weights_path: "weights/groundingdino_swint_ogc.pth"
+
+training:
+  num_epochs: 1000
+  learning_rate: 1e-3
+  save_dir: "weights"
+  save_frequency: 100
+  warmup_epochs: 5
+  use_lora: true
+  visualization_frequency: 5

@@ -1,20 +1,10 @@
 import os
-import cv2
-import csv
 from collections import defaultdict
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from groundingdino.util.train import load_model, load_image
-from torchvision.ops import generalized_box_iou  
+from torch.utils.data import DataLoader
+from groundingdino.util.train import load_model
 from groundingdino.util.misc import nested_tensor_from_tensor_list
-from torchvision.ops import generalized_box_iou
-import torch.nn as nn
-import supervision as sv
-from groundingdino.util.class_loss import BCEWithLogitsLoss,MultilabelFocalLoss,FocalLoss
 from ema_pytorch import EMA
-from groundingdino.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
-from groundingdino.util.vl_utils import build_captions_and_token_span
 from typing import Dict, NamedTuple
 from groundingdino.util.model_utils import freeze_model_layers,print_frozen_status
 from torch.optim.lr_scheduler import OneCycleLR
@@ -23,271 +13,53 @@ from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
 from groundingdino.util.lora import get_lora_weights
 from datetime import datetime
+import yaml
+from dataclasses import dataclass
+from typing import Dict, Optional, Any
+from dataset import GroundingDINODataset
+from losses import SetCriterion
+from config import ConfigurationManager, DataConfig, ModelConfig
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-
-class SetCriterion(nn.Module):
-    
-    def __init__(self, num_classes, matcher, eos_coef, losses,loss_type= 'focal'):
-        super().__init__()
-        self.num_classes = num_classes
-        self.matcher = matcher
-        self.eos_coef = eos_coef  # Will use this to weight no-object loss
-        self.losses = losses
-        self.matcher = matcher
-        if loss_type == 'bce':
-            self.cls_loss = BCEWithLogitsLoss(eos_coef=eos_coef)
-        elif loss_type == 'multilabelfocal':
-            self.cls_loss = MultilabelFocalLoss(eos_coef=eos_coef)
-        elif loss_type == 'focal':
-            self.cls_loss = FocalLoss(eos_coef=eos_coef)
-        else:
-            raise ValueError(f"Unsupported loss type: {loss_type}")
-
-    class ProcessedTargets(NamedTuple):
-        """Container for preprocessed targets and masks"""
-        pred_logits: torch.Tensor     # All predictions
-        target_labels: torch.Tensor   # All targets
-        text_mask: torch.Tensor       # Only valid text mask
-        valid_mask: torch.Tensor      # Combined mask src and targets indices along with text masks 
-        device: torch.device
-
-    def preprocess_targets(self, outputs: Dict[str, torch.Tensor],
-                        cls_labels: torch.Tensor,
-                        indices: list) -> ProcessedTargets:
-        """
-        Preprocess targets and create masks for loss computation
-        """
-        bs, num_queries, num_classes = outputs['pred_logits'].shape
-        text_mask = outputs['text_mask']  # [bs, num_classes]
-        device = outputs['pred_logits'].device
-        
-        # Create target tensors
-        target_mask = torch.zeros((bs, num_queries, num_classes), dtype=torch.bool, device=device)
-        target_labels = torch.zeros((bs, num_queries, num_classes), dtype=cls_labels.dtype, device=device)
-        
-        # Fill target tensors
-        offset = 0
-        for batch_idx, (pred_indices, tgt_indices) in enumerate(indices):
-            target_mask[batch_idx, pred_indices] = text_mask[batch_idx]
-            num_targets = len(tgt_indices)
-            batch_tgt_labels = cls_labels[offset:offset + num_targets]
-            target_labels[batch_idx, pred_indices] = batch_tgt_labels[tgt_indices]
-            offset += num_targets
-        
-        return self.ProcessedTargets(
-            pred_logits=outputs['pred_logits'],
-            target_labels=target_labels,
-            text_mask=text_mask,
-            valid_mask=target_mask,
-            device=device
-        )
-
-    def loss_labels(self, outputs, targets, indices, log=False, **kwargs):
-        """Compute the classification loss"""
-        assert 'pred_logits' in outputs
-        
-        # Get processed targets
-        tgt_labels = kwargs['cls_labels']
-        processed = self.preprocess_targets(outputs, tgt_labels, indices)
-        
-        # Compute loss using the new interface
-        loss = self.cls_loss(
-            preds=processed.pred_logits,
-            targets=processed.target_labels,
-            valid_mask=processed.valid_mask,
-            text_mask=processed.text_mask
-        )
-        
-        losses = {'loss_ce': loss}
-        
-        # Compute accuracies if logging is enabled
-        if log:
-            acc_dict=self._compute_accuracy(processed=processed)    
-            losses.update(acc_dict)
-        
-        return losses
-
-    def _compute_accuracy(self, processed: ProcessedTargets):
-        with torch.no_grad():
-            bs, num_queries, num_classes = processed.pred_logits.shape
-            
-            # For matched queries text token accuracy
-            valid_preds = processed.pred_logits[processed.valid_mask.bool()]
-            valid_targets = processed.target_labels[processed.valid_mask.bool()]
-            
-            if valid_preds.numel() > 0:
-                token_acc = (valid_preds.sigmoid() > 0.5) == valid_targets
-                token_acc = token_acc.float().mean() * 100
-                
-                # Reshape masks to match logits
-                unmatched_mask = ~processed.valid_mask.bool()  # bs x queries x 256
-                text_mask = processed.text_mask.unsqueeze(1).expand(-1, num_queries, -1)  # Expand to match shape
-                
-                # Apply both masks
-                total_mask = unmatched_mask & text_mask
-                unmatched_preds = processed.pred_logits[total_mask]
-                background_acc = (unmatched_preds.sigmoid() < 0.5).float().mean() * 100
-
-            else:
-                token_acc = background_acc = torch.tensor(0.0, device=processed.device)
-                
-            return {
-                'Matched_Token_Accuracy': token_acc,
-                'UnMatched_Token_Accuracy': background_acc
-            }
-
-    def loss_boxes(self, outputs, targets, indices, **kwargs):
-        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-           The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
-        """
-        assert 'pred_boxes' in outputs
-        idx = self._get_src_permutation_idx(indices)
-        src_boxes = outputs['pred_boxes'][idx]
-        
-        # Get target boxes and normalize them
-        tgt_boxes_list = []
-        for t, (_, i) in zip(targets, indices):
-            # Convert and normalize the matched target boxes
-            h, w = t['size']
-            scale_fct = torch.tensor([w, h, w, h], device=src_boxes.device)
-            t_boxes = t["boxes"][i] / scale_fct
-            tgt_boxes_list.append(t_boxes)
-            
-        target_boxes = torch.cat(tgt_boxes_list, dim=0)
-
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
-
-        num_boxes=target_boxes.shape[0]
-        losses = {}
-        losses['loss_bbox'] = loss_bbox.sum() / num_boxes
-
-        loss_giou = 1 - torch.diag(generalized_box_iou(
-            box_cxcywh_to_xyxy(src_boxes),
-            box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_boxes
-        return losses
-    
-    def _get_src_permutation_idx(self, indices):
-        # permute predictions following indices
-        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
-        src_idx = torch.cat([src for (src, _) in indices])
-        return batch_idx, src_idx
-
-    def _get_tgt_permutation_idx(self, indices):
-        # permute targets following indices
-        batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
-        tgt_idx = torch.cat([tgt for (_, tgt) in indices])
-        return batch_idx, tgt_idx
-    
-    def get_loss(self, loss, outputs, targets, indices, **kwargs):
-        loss_map = {
-            'labels': self.loss_labels,
-            'boxes': self.loss_boxes,
-        }
-        assert loss in loss_map, f'do you really want to compute {loss} loss?'
-        return loss_map[loss](outputs, targets, indices, **kwargs)
-
-    
-    def forward(self, outputs, targets, **kwargs):
-        """ This performs the loss computation.
-        Parameters:
-             outputs: dict of tensors, see the output specification of the model for the format
-             targets: list of dicts, such that len(targets) == batch_size.
-                      The expected keys in each dict depends on the losses applied, see each loss' doc
-        """ 
-        # Retrieve the matching between the outputs of the last layer and the targets also returning cls labels to avoid caclulating it during loss
-        indices, cls_labels = self.matcher(outputs, targets)
-        #print(f"indeices of hungarian matcher are {indices}")
-        # Compute all the requested losses
-        losses = {}
-        for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs, targets, indices, cls_labels=cls_labels))
-
-        # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
-        if 'aux_outputs' in outputs:
-            for i, aux_outputs in enumerate(outputs['aux_outputs']):
-                indices = self.matcher(aux_outputs, targets)
-                for loss in self.losses:
-                    kwargs = {}
-                    if loss == 'labels':
-                        # Logging is enabled only for the last layer
-                        kwargs = {'log': False}
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, **kwargs)
-                    l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
-                    losses.update(l_dict)
-
-        return losses
-
-class GroundingDINODataset(Dataset):
-    def __init__(self, img_dir, ann_file, transforms=None):
-        """
-        Args:
-            img_dir (str): Path to image directory
-            ann_file (str): Path to annotation CSV
-            transforms: Optional transform to be applied
-    
-        """
-        self.img_dir = img_dir
-        self.transforms = transforms
-        self.annotations = self.read_dataset(img_dir, ann_file)
-        self.image_paths = list(self.annotations.keys())
-
-    def read_dataset(self, img_dir, ann_file):
-        """
-        Read dataset annotations and convert to [x,y,w,h] format
-        """
-        ann_dict = defaultdict(lambda: defaultdict(list))
-        with open(ann_file) as file_obj:
-            ann_reader = csv.DictReader(file_obj)
-            for row in ann_reader:
-                img_path = os.path.join(img_dir, row['image_name'])
-                # Store in [x,y,w,h] format directly
-                x = int(row['bbox_x'])
-                y = int(row['bbox_y'])
-                w = int(row['bbox_width'])
-                h = int(row['bbox_height'])
-                
-                # Convert to center format [cx,cy,w,h]
-                cx = x + w/2
-                cy = y + h/2
-                ann_dict[img_path]['boxes'].append([cx, cy, w, h])
-                ann_dict[img_path]['phrases'].append(row['label_name'])
-        return ann_dict
     
 
-    def __len__(self):
-        return len(self.image_paths)
+def setup_model(model_config: ModelConfig, use_lora: bool) -> torch.nn.Module:
+    return load_model(
+        model_config.config_path,
+        model_config.weights_path,
+        use_lora=use_lora
+    )
 
-    def __getitem__(self, idx):
-        img_path = self.image_paths[idx]
-        # Load and transform image
-        image_source, image = load_image(img_path)
-        h, w = image_source.shape[0:2]  
+def setup_data_loaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
 
-
-        boxes = torch.tensor(self.annotations[img_path]['boxes'], dtype=torch.float32)
-        str_cls_lst = self.annotations[img_path]['phrases']
-        
-        # Create caption mapping and format
-        caption_dict = {item: idx for idx, item in enumerate(str_cls_lst)}
-        captions,cat2tokenspan = build_captions_and_token_span(str_cls_lst,force_lowercase=True)
-        classes = torch.tensor([caption_dict[p] for p in str_cls_lst], dtype=torch.int64)
-
-        target = {
-            'boxes': boxes,  # Already in [cx,cy,w,h] format
-            'size': torch.as_tensor([int(h), int(w)]),
-            'orig_img': image_source,  
-            'str_cls_lst': str_cls_lst,  
-            'caption': captions,
-            'labels': classes, 
-            'cat2tokenspan': cat2tokenspan
-        }
-
-        return image, target
+    train_dataset = GroundingDINODataset(
+        config.train_dir,
+        config.train_ann
+    )
+    
+    val_dataset = GroundingDINODataset(
+        config.val_dir,
+        config.val_ann
+    )
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+        collate_fn=lambda x: tuple(zip(*x))
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,  # Keep batch size 1 for validation
+        shuffle=False,
+        num_workers=1,
+        collate_fn=lambda x: tuple(zip(*x))
+    )
+    
+    return train_loader, val_loader
     
 
 class GroundingDINOTrainer:
@@ -392,9 +164,7 @@ class GroundingDINOTrainer:
         """Single training step"""
         self.model.train()
         #self.get_ema_model().train()
-        
-        self.optimizer.zero_grad()
-        
+        self.optimizer.zero_grad() 
         # Prepare batch
         images, targets, captions = self.prepare_batch(batch)
         outputs = self.model(images, captions=captions)
@@ -403,7 +173,6 @@ class GroundingDINOTrainer:
         ## backward pass
         total_loss.backward()
         loss_dict['total_loss']=total_loss
-        # Log gradients
         #total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=20.0)
         #print(f"Gradient norm: {total_norm:.4f}")
         self.optimizer.step()
@@ -454,7 +223,7 @@ class GroundingDINOTrainer:
         if use_lora:
             checkpoint = {
             'epoch': epoch,
-            'model_state_dict': get_lora_weights(model),
+            'model_state_dict': get_lora_weights(self.model),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'losses': losses,}
@@ -469,76 +238,64 @@ class GroundingDINOTrainer:
             }
         torch.save(checkpoint, path)
 
-def train(
-    model,
-    data_dict,
-    num_epochs=200,
-    batch_size=2,
-    learning_rate=1e-3,
-    save_dir='weights',
-    save_frequency=5,
-    warmup_epochs=5,
-    use_lora=False
-):
+def train(config_path: str, save_dir: Optional[str] = None) -> None:
+    """
+    Main training function with configuration management
     
+    Args:
+        config_path: Path to the YAML configuration file
+        save_dir: Optional override for save directory
+    """
 
-    save_dir = os.path.join(save_dir, datetime.now().strftime("%Y%m%d_%H%M"))
+    data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
+
+    model = setup_model(model_config, training_config.use_lora)
     
-    # Create directory
+    if save_dir:
+        training_config.save_dir = save_dir
+    
+    # Setup save directory with timestamp
+    save_dir = os.path.join(
+        training_config.save_dir,
+        datetime.now().strftime("%Y%m%d_%H%M")
+    )
     os.makedirs(save_dir, exist_ok=True)
+    
+    config_save_path = os.path.join(save_dir, 'config.yaml')
+    with open(config_save_path, 'w') as f:
+        yaml.dump({
+            'data': vars(data_config),
+            'model': vars(model_config),
+            'training': vars(training_config)
+        }, f, default_flow_style=False)
+    
+    train_loader, val_loader = setup_data_loaders(data_config)
 
-    train_dataset = GroundingDINODataset(
-        data_dict['train_dir'],
-        data_dict['train_ann']
-    )
-
-    val_dataset = GroundingDINODataset(
-        data_dict['val_dir'],
-        data_dict['val_ann']
-    )
+    steps_per_epoch = len(train_loader.dataset) // data_config.batch_size
     
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=8,
-        collate_fn=lambda x: tuple(zip(*x)) 
+    trainer = GroundingDINOTrainer(
+        model,
+        num_steps_per_epoch=steps_per_epoch,
+        num_epochs=training_config.num_epochs,
+        warmup_epochs=training_config.warmup_epochs,
+        learning_rate=training_config.learning_rate
     )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=1,
-        collate_fn=lambda x: tuple(zip(*x)) 
-    )
-    
-    steps_per_epoch = len(train_dataset) // batch_size
-    
-    trainer = GroundingDINOTrainer(model,
-                                    num_steps_per_epoch=steps_per_epoch,
-                                    num_epochs=num_epochs,
-                                    warmup_epochs=warmup_epochs,
-                                    learning_rate=learning_rate)
     
     visualizer = GroundingDINOVisualizer(save_dir=save_dir)
     
-    # if we are using lora then it is takien care of while setting up lora
-    if not use_lora:
-       print(f"Freezing most of model except few layers!! ")
-       freeze_model_layers(model)
+    if not training_config.use_lora:
+        print("Freezing most of model except few layers!")
+        freeze_model_layers(model)
     
     print_frozen_status(model)
-
-    for epoch in range(num_epochs):  
-        ## Do visualization on val dataset passed as input loop through it
-        if epoch % 5 == 0:
+    
+    # Training loop
+    for epoch in range(training_config.num_epochs):
+        if epoch % training_config.visualization_frequency == 0:
             visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch)
         
         epoch_losses = defaultdict(list)
-
         for batch_idx, batch in enumerate(train_loader):
-            
             losses = trainer.train_step(batch)
             
             # Record losses
@@ -547,36 +304,23 @@ def train(
             
             if batch_idx % 5 == 0:
                 loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
-                print(f"Epoch {epoch+1}/{num_epochs}, Batch {batch_idx}/{len(train_loader)}, {loss_str}")
+                print(f"Epoch {epoch+1}/{training_config.num_epochs}, "
+                      f"Batch {batch_idx}/{len(train_loader)}, {loss_str}")
                 print(f"Learning rate: {trainer.optimizer.param_groups[0]['lr']:.6f}")
-            break
-        
-        
-        avg_losses = {k: sum(v)/len(v) for k, v in epoch_losses.items()}
-        print(f"Epoch {epoch+1} complete. Average losses:", ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
 
-        if (epoch + 1) % save_frequency == 0:
+        avg_losses = {k: sum(v)/len(v) for k, v in epoch_losses.items()}
+        print(f"Epoch {epoch+1} complete. Average losses:",
+              ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
+        
+        # Save checkpoint
+        if (epoch + 1) % training_config.save_frequency == 0:
             trainer.save_checkpoint(
                 os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'),
                 epoch,
                 avg_losses,
-                use_lora=use_lora
+                use_lora=training_config.use_lora
             )
 
             
 if __name__ == "__main__":
-    
-    data_dict = {
-        'train_dir': "multimodal-data/fashion_dataset_subset/images/train",
-        'train_ann': "multimodal-data/fashion_dataset_subset/train_annotations.csv",
-        'val_dir': "multimodal-data/fashion_dataset_subset/images/val",
-        'val_ann': "multimodal-data/fashion_dataset_subset/val_annotations.csv"
-    }
-    use_lora = False
-    model = load_model("groundingdino/config/GroundingDINO_SwinT_OGC.py", "weights/groundingdino_swint_ogc.pth",use_lora=use_lora)
-    train(model, data_dict, use_lora=False) 
-
-
-##
-##Frozen Parameters: 172,972,294 (99.77%)
-##Trainable Parameters: 391,232 (0.23%)
+    train('config.yaml')
