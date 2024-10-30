@@ -21,7 +21,79 @@ def load_lora_weights(model, weights_path):
     model.load_state_dict(lora_state_dict, strict=False)
 
 
-def add_lora_to_model(model, rank=32):
+
+
+
+def add_lora_to_model(model, rank=8):
+    """
+    Adds LoRA to linear layers in Grounding DINO model
+    """
+    # List all linear layer names from model architecture
+    lora_config = LoraConfig(
+        r=rank,
+        lora_alpha=rank,
+        target_modules=[
+            # Transformer Encoder layers
+            "sampling_offsets",  # MultiScaleDeformableAttention
+            "attention_weights",
+            "value_proj",
+            "output_proj",
+            "linear1",  # FFN
+            "linear2",
+            "out_proj",  # MultiheadAttention
+            # Transformer Decoder layers
+            "sampling_offsets",  # MultiScaleDeformableAttention
+            "attention_weights",
+            "value_proj",
+            "output_proj",
+            "linear1",  # FFN
+            "linear2",
+            # BiMultiHeadAttention layers
+            "v_proj",
+            "l_proj",
+            "values_v_proj",
+            "values_l_proj",
+            "out_v_proj",
+            "out_l_proj",
+            # Query, Key, Value projections
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            # Various other linear layers
+            "feat_map",
+            "query",
+            "key",
+            "value",
+            "dense"
+        ],
+        lora_dropout=0.1,
+        bias="none",
+    )
+
+    # Apply LoRA to entire model
+    print("Adding LoRA to model...")
+    model = get_peft_model(model, lora_config)
+    
+    # Freeze base model
+    print("\nFreezing base model parameters...")
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Unfreeze LoRA parameters
+    print("Unfreezing LoRA parameters...")
+    for n, p in model.named_parameters():
+        if 'lora_' in n:
+            p.requires_grad = True
+            print(f"Unfroze: {n}")
+
+    # Log stats
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\nLoRA Trainable params: {trainable_params} ({100 * trainable_params / total_params:.2f}% of total)")
+    
+    return model
+
+def add_lora_to_layers(model, rank=32):
     """
     Adds LoRA to linear layers in Grounding DINO model
     """
