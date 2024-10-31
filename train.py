@@ -91,7 +91,7 @@ class GroundingDINOTrainer:
         self.optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=learning_rate,
-            weight_decay=0.0  # Removed for overfitting
+            weight_decay=1e-4  # Removed for overfitting
         )
         
         # Initialize scheduler with warmup
