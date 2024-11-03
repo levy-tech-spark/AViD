@@ -8,7 +8,7 @@ from ema_pytorch import EMA
 from typing import Dict, NamedTuple
 from groundingdino.util.model_utils import freeze_model_layers,print_frozen_status
 from torch.optim.lr_scheduler import OneCycleLR
-from matchers import build_matcher
+from groundingdino.util.matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
 from groundingdino.util.lora import get_lora_weights
@@ -16,8 +16,8 @@ from datetime import datetime
 import yaml
 from dataclasses import dataclass
 from typing import Dict, Optional, Any
-from dataset import GroundingDINODataset
-from losses import SetCriterion
+from groundingdino.datasets.dataset import GroundingDINODataset
+from groundingdino.util.losses import SetCriterion
 from config import ConfigurationManager, DataConfig, ModelConfig
 
 # Ignore tokenizer warning
