@@ -35,14 +35,19 @@ def preprocess_caption(caption: str) -> str:
     
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda", use_lora: bool =False):
+def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda", use_lora: bool =False, use_lora_layers: bool =True):
     args = SLConfig.fromfile(model_config_path)
     args.device = device
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
     model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-    if use_lora:
+    if use_lora and use_lora_layers:
+        print(f"Added Lora to Layers!!")
         add_lora_to_layers(model)
+        print(f"Lora model is {model}")
+    else:
+        print(f"Added Lora to Model!!")
+        add_lora_to_model(model)
         print(f"Lora model is {model}")
     return model
 

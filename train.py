@@ -14,7 +14,6 @@ from groundingdino.util.model_utils import freeze_model_layers, print_frozen_sta
 from groundingdino.util.lora import get_lora_weights
 from datetime import datetime
 import yaml
-from dataclasses import dataclass
 from typing import Dict, Optional, Any
 from groundingdino.datasets.dataset import GroundingDINODataset
 from groundingdino.util.losses import SetCriterion
@@ -24,11 +23,12 @@ from config import ConfigurationManager, DataConfig, ModelConfig
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
 
-def setup_model(model_config: ModelConfig, use_lora: bool) -> torch.nn.Module:
+def setup_model(model_config: ModelConfig, use_lora: bool=False, use_lora_layers:bool=True) -> torch.nn.Module:
     return load_model(
         model_config.config_path,
         model_config.weights_path,
-        use_lora=use_lora
+        use_lora=use_lora,
+        use_lora_layers=use_lora_layers
     )
 
 def setup_data_loaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
@@ -144,7 +144,6 @@ class GroundingDINOTrainer:
         self.criterion.to(device)
 
     def prepare_batch(self, batch):
-        """Prepare batch according to Grounding DINO specifications"""
         images, targets = batch
         # Convert list of images to NestedTensor and move to device
         if isinstance(images, (list, tuple)):
@@ -249,7 +248,7 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
 
     data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
 
-    model = setup_model(model_config, training_config.use_lora)
+    model = setup_model(model_config, training_config.use_lora,training_config.use_lora_layers)
     
     if save_dir:
         training_config.save_dir = save_dir

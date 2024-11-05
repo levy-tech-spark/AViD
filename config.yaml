@@ -17,4 +17,5 @@ training:
   save_frequency: 100
   warmup_epochs: 5
   use_lora: true
+  use_lora_layers: true
   visualization_frequency: 5
