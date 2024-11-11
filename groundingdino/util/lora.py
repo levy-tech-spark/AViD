@@ -64,7 +64,8 @@ def add_lora_to_model(model, rank=8):
             "query",
             "key",
             "value",
-            "dense"
+            "dense",    
+            "bbox_embed",
         ],
         lora_dropout=0.1,
         bias="none",
@@ -102,7 +103,7 @@ def add_lora_to_layers(model, rank=32):
         r=rank,
         lora_alpha=rank,
         target_modules=["0", "1", "2"],  # MLP layer indices
-        lora_dropout=0.1,
+        lora_dropout=1e-3,
         bias="none",
     )
 

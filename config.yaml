@@ -17,5 +17,6 @@ training:
   save_frequency: 100
   warmup_epochs: 5
   use_lora: true
-  use_lora_layers: true
+  use_lora_layers: true # This applies lora to only bbox pred layer and few transformer decoder layers the number of trainable parameters in this case will be < 1% of total parameters
+                        # if it is false then it applies 
   visualization_frequency: 5
