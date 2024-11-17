@@ -1,10 +1,10 @@
 from groundingdino.util.inference import load_model, load_image, predict, annotate
-import cv2
 import torch
 import torchvision.ops as ops
 import os
 from torchvision.ops import box_convert
 from groundingdino.util.inference import GroundingDINOVisualizer
+from config import ConfigurationManager, DataConfig, ModelConfig
 
 def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
     h, w, _ = image_source.shape
@@ -28,19 +28,17 @@ def apply_nms_per_phrase(image_source, boxes, logits, phrases, threshold=0.3):
     return torch.stack(nms_boxes_list), torch.stack(nms_logits_list), nms_phrases_list
 
 
-def process_image(
-        model_config="groundingdino/config/GroundingDINO_SwinT_OGC.py",
-        model_weights="weights/groundingdino_swint_ogc.pth",
-        image_path="multimodal-data/fashion_dataset_subset/images/val/val_000004.jpg",
-        text_prompt="shirt .bag .pants",
+def process_images(
+        model,
+        text_prompt,
+        data_config,
         box_threshold=0.35,
         text_threshold=0.25
 ):
-    model = load_model(model_config, model_weights)
     visualizer = GroundingDINOVisualizer(save_dir="visualizations")
 
-    for img in os.listdir('multimodal-data/fashion_dataset_subset/images/val'):
-        image_path=os.path.join('multimodal-data/fashion_dataset_subset/images/val',img)
+    for img in os.listdir(data_config.val_dir):
+        image_path=os.path.join(data_config.val_dir,img)
         image_source, image = load_image(image_path)
         visualizer.visualize_image(model,image,text_prompt,image_source,img)
 
@@ -60,5 +58,10 @@ def process_image(
 
 
 if __name__ == "__main__":
-    model_weights="weights/groundingdino_swint_ogc.pth"
-    process_image(model_weights=model_weights)
+    # Config file of the prediction, the model weights can be complete model weights but if use_lora is true then lora_wights should also be present see example
+    ## config file
+    config_path="configs/test_config.yaml"
+    text_prompt="shirt .bag .pants",
+    data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
+    model = load_model(model_config,training_config.use_lora)
+    process_images(model,text_prompt,data_config)

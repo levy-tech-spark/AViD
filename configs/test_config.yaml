@@ -1,0 +1,20 @@
+data:
+  batch_size: 4
+  num_workers: 8
+  train_ann: multimodal-data/fashion_dataset_subset/train_annotations.csv
+  train_dir: multimodal-data/fashion_dataset_subset/images/train
+  val_ann: multimodal-data/fashion_dataset_subset/val_annotations.csv
+  val_dir: multimodal-data/fashion_dataset_subset/images/val
+model:
+  config_path: groundingdino/config/GroundingDINO_SwinT_OGC.py
+  lora_weigths: None
+  weights_path: weights/groundingdino_swint_ogc.pth
+training:
+  learning_rate: 0.0001
+  num_epochs: 200
+  save_dir: weights
+  save_frequency: 5
+  use_lora: true
+  use_lora_layers: true
+  visualization_frequency: 5
+  warmup_epochs: 5

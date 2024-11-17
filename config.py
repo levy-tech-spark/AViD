@@ -27,12 +27,14 @@ class DataConfig:
 class ModelConfig:
     config_path: str
     weights_path: str
+    lora_weigths: str = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ModelConfig':
         return cls(
             config_path=str(data['config_path']),
-            weights_path=str(data['weights_path'])
+            weights_path=str(data['weights_path']),
+            lora_weigths=str(data.get('lora_weights', None)),
         )
 
 @dataclass

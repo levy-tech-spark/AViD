@@ -65,7 +65,6 @@ def add_lora_to_model(model, rank=8):
             "key",
             "value",
             "dense",    
-            "bbox_embed",
         ],
         lora_dropout=0.1,
         bias="none",

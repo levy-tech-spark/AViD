@@ -222,14 +222,14 @@ class GroundingDINOTrainer:
         if use_lora:
             checkpoint = {
             'epoch': epoch,
-            'model_state_dict': get_lora_weights(self.model),
+            'model': get_lora_weights(self.model),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'losses': losses,}
         else:
             checkpoint = {
                 'epoch': epoch,
-                'model_state_dict': self.model.state_dict(),
+                'model': self.model.state_dict(),
                 'ema_state_dict': self.ema_model.state_dict() if self.use_ema else None,
                 'optimizer_state_dict': self.optimizer.state_dict(),
                 'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
@@ -322,4 +322,4 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
 
             
 if __name__ == "__main__":
-    train('config.yaml')
+    train('configs/train_config.yaml')

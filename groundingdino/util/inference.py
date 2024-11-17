@@ -18,6 +18,7 @@ from groundingdino.util.utils import get_phrases_from_posmap
 from groundingdino.util.class_loss import FocalLoss
 import os
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy
+from config import ModelConfig
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
@@ -31,16 +32,27 @@ def preprocess_caption(caption: str) -> str:
     return result + "."
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str = "cuda",strict: bool =True):
-    args = SLConfig.fromfile(model_config_path)
-    args.device = device
-    model = build_model(args)
-    checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
+def load_weights(model:torch.nn.Module,checkpoint:dict):
     if "model" in checkpoint.keys():
         model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     else:
         # The state dict is the checkpoint
-        model.load_state_dict(clean_state_dict(checkpoint), strict=True)
+        model.load_state_dict(clean_state_dict(checkpoint), strict=False)
+
+
+def load_model(model_config:ModelConfig, use_lora:bool= False, device: str = "cuda",strict: bool =True):
+    args = SLConfig.fromfile(model_config.config_path)
+    args.device = device
+    model = build_model(args)
+    # Loading main weights if lora is not used these are the only one required
+    checkpoint = torch.load(model_config.weights_path, map_location="cpu")
+    print(f"Loading main model Weights!!")
+    load_weights(model,checkpoint)
+    if use_lora:
+        print(f"Loading Lora Weights!!")
+        checkpoint = torch.load(model_config.lora_weigths, map_location="cpu")
+        load_weights(model,checkpoint)
+
     model.eval()
     return model
 

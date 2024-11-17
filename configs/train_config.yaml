@@ -12,9 +12,9 @@ model:
 
 training:
   num_epochs: 200
-  learning_rate: 1e-3
+  learning_rate: 1e-4
   save_dir: "weights"
-  save_frequency: 100
+  save_frequency: 5
   warmup_epochs: 5
   use_lora: true
   use_lora_layers: true # This applies lora to only bbox pred layer and few transformer decoder layers the number of trainable parameters in this case will be < 1% of total parameters
