@@ -13,3 +13,5 @@ gitconfig.sh
 **/multimodal-data/
 vis_Dataset/
 visualizations/
+
+*.swp
