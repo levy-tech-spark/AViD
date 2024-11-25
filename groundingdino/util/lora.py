@@ -16,12 +16,47 @@ def get_lora_weights(model):
         print("No LoRA weights found in the model.")
     return lora_state_dict
 
+def get_lora_optimizer_params(model):
+    # Get only LoRA trainable parameters for optimizer
+    lora_params = []
+    for name, param in model.named_parameters():
+        if 'lora_' in name and param.requires_grad:
+            lora_params.append(param)
+    #params=sum(p.numel() for p in lora_params)
+    #print(params)
+    return lora_params
+
 def load_lora_weights(model, weights_path):
     lora_state_dict = torch.load(weights_path)
     model.load_state_dict(lora_state_dict, strict=False)
 
 
-
+def verify_only_lora_trainable(model):
+    """
+    Verifies that only LoRA parameters are trainable and counts parameters accurately
+    """
+    trainable_non_lora = []
+    lora_params = 0
+    trainable_lora = 0
+    
+    for name, param in model.named_parameters():
+        if 'lora_' in name:
+            lora_params += param.numel()
+            if param.requires_grad:
+                trainable_lora += param.numel()
+        elif param.requires_grad:
+            trainable_non_lora.append(name)
+    
+    if trainable_non_lora:
+        print("WARNING: Found non-LoRA trainable parameters:")
+        for name in trainable_non_lora:
+            print(f"- {name}")
+        return False
+    
+    print(f"✓ Only LoRA parameters are trainable")
+    print(f"Total LoRA parameters: {lora_params:,}")
+    print(f"Trainable LoRA parameters: {trainable_lora:,}")
+    return True
 
 
 def add_lora_to_model(model, rank=8):
@@ -102,7 +137,7 @@ def add_lora_to_layers(model, rank=32):
         r=rank,
         lora_alpha=rank,
         target_modules=["0", "1", "2"],  # MLP layer indices
-        lora_dropout=1e-3,
+        #lora_dropout=1e-3,
         bias="none",
     )
 
@@ -132,7 +167,7 @@ def add_lora_to_layers(model, rank=32):
             "linear1",
             "linear2"
         ],
-        lora_dropout=0.1,
+        #lora_dropout=0.1,
         bias="none",
     )
 
@@ -152,7 +187,7 @@ def add_lora_to_layers(model, rank=32):
         r=rank,
         lora_alpha=rank,
         target_modules=["feat_map"],  # Now we can target by this name
-        lora_dropout=0.1,
+        #lora_dropout=0.1,
         bias="none",
     )
 

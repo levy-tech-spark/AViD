@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from groundingdino.util.matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
-from groundingdino.util.lora import get_lora_weights
+from groundingdino.util.lora import get_lora_weights,get_lora_optimizer_params, verify_only_lora_trainable
 from datetime import datetime
 import yaml
 from typing import Dict, Optional, Any
@@ -80,24 +80,33 @@ class GroundingDINOTrainer:
         num_steps_per_epoch=None,
         lr_scheduler="onecycle",
         eos_coef=0.1,
-        max_txt_len=256
+        max_txt_len=256,
+        use_lora=False
     ):
         self.model = model.to(device)
         self.device = device
         self.class_loss_coef = class_loss_coef
         self.bbox_loss_coef = bbox_loss_coef
         self.giou_loss_coef = giou_loss_coef
-        
-        self.optimizer = torch.optim.AdamW(
-            model.parameters(),
-            lr=learning_rate,
-            weight_decay=1e-4  # Removed for overfitting
-        )
+        # LoRA parameters: 1,523,840 / 174,363,522 = 0.87%
+        if use_lora:
+            lora_params=get_lora_optimizer_params(model)
+            self.optimizer = torch.optim.AdamW(
+                lora_params,
+                lr=learning_rate,
+                #weight_decay=1e-4  # Removed for overfitting
+            )
+        else:
+            self.optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=learning_rate,
+                weight_decay=1e-4  # Removed for overfitting
+            )
         
         # Initialize scheduler with warmup
         if lr_scheduler=="onecycle":
             total_steps = num_steps_per_epoch * num_epochs
-            warmup_steps = num_steps_per_epoch * warmup_epochs  
+            #warmup_steps = num_steps_per_epoch * warmup_epochs  
             #self.scheduler = get_cosine_schedule_with_warmup(
             #    self.optimizer,
             #    num_warmup_steps=warmup_steps,
@@ -277,7 +286,8 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
         num_steps_per_epoch=steps_per_epoch,
         num_epochs=training_config.num_epochs,
         warmup_epochs=training_config.warmup_epochs,
-        learning_rate=training_config.learning_rate
+        learning_rate=training_config.learning_rate,
+        use_lora=training_config.use_lora
     )
     
     visualizer = GroundingDINOVisualizer(save_dir=save_dir)
@@ -285,8 +295,11 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     if not training_config.use_lora:
         print("Freezing most of model except few layers!")
         freeze_model_layers(model)
+        print_frozen_status(model)
     
-    print_frozen_status(model)
+    else:
+         assert verify_only_lora_trainable(model), "Non-LoRA parameters are trainable!"
+        
     
     # Training loop
     for epoch in range(training_config.num_epochs):

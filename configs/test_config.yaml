@@ -7,7 +7,7 @@ data:
   val_dir: multimodal-data/fashion_dataset_subset/images/val
 model:
   config_path: groundingdino/config/GroundingDINO_SwinT_OGC.py
-  lora_weigths: weights/20241220_0127/checkpoint_epoch_25.pth
+  lora_weights: weights/20241220_1406/checkpoint_epoch_5.pth
   weights_path: weights/groundingdino_swint_ogc.pth
 training:
   learning_rate: 0.0001
