@@ -19,7 +19,7 @@ from groundingdino.util.class_loss import FocalLoss
 import os
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy
 from config import ModelConfig
-from groundingdino.util.lora import add_lora_to_layers, add_lora_to_model
+from groundingdino.util.lora import add_lora_to_layers,add_lora_to_layers2, add_lora_to_model
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
@@ -45,15 +45,24 @@ def load_model(model_config:ModelConfig, use_lora:bool= False, use_lora_layers:b
     args = SLConfig.fromfile(model_config.config_path)
     args.device = device
     model = build_model(args)
-    ## BUild Lora model just like training model
+
+    # Load base weights
+    base_ckpt = torch.load(model_config.weights_path, map_location="cpu")
+    load_weights(model,base_ckpt)
+    # BUild Lora model just like training model
     if use_lora and use_lora_layers:
         print(f"Added Lora to Layers!!")
-        add_lora_to_layers(model)
+        model=add_lora_to_layers2(model)
+        lora_ckpt = torch.load(model_config.lora_weigths, map_location="cpu")
+        load_weights(model,lora_ckpt)
         print(f"Lora model is {model}")
-    else:
-        print(f"Added Lora to Model!!")
-        add_lora_to_model(model)
-        print(f"Lora model is {model}")
+        model = model.merge_and_unload()
+        print("LoRA weights merged with base model")
+    return model
+    #else:
+    #    print(f"Added Lora to Model!!")
+    #    add_lora_to_model(model)
+    #    print(f"Lora model is {model}")
 
     # Loading main weights if lora is not used these are the only one required
     checkpoint = torch.load(model_config.weights_path, map_location="cpu")
@@ -213,9 +222,11 @@ class GroundingDINOVisualizer:
             pred_logits = outputs["pred_logits"][0].cpu().sigmoid()
             pred_boxes = outputs["pred_boxes"][0].cpu()
             
+            # Box threshold
+            th=0.3
             # Filter confident predictions
             scores = pred_logits.max(dim=1)[0]
-            mask = scores > 0.3  # Box threshold
+            mask = scores > th 
 
             filtered_boxes = pred_boxes[mask]
             filtered_logits = pred_logits[mask]

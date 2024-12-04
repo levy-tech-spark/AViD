@@ -18,6 +18,7 @@ from typing import Dict, Optional, Any
 from groundingdino.datasets.dataset import GroundingDINODataset
 from groundingdino.util.losses import SetCriterion
 from config import ConfigurationManager, DataConfig, ModelConfig
+from peft import get_peft_model_state_dict
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -88,7 +89,7 @@ class GroundingDINOTrainer:
         self.class_loss_coef = class_loss_coef
         self.bbox_loss_coef = bbox_loss_coef
         self.giou_loss_coef = giou_loss_coef
-        # LoRA parameters: 1,523,840 / 174,363,522 = 0.87%
+        
         if use_lora:
             lora_params=get_lora_optimizer_params(model)
             self.optimizer = torch.optim.AdamW(
@@ -229,8 +230,10 @@ class GroundingDINOTrainer:
     def save_checkpoint(self, path, epoch, losses, use_lora=False):
         """Save checkpoint with EMA and scheduler state""" 
         if use_lora:
+            lora_state_dict = get_peft_model_state_dict(self.model)
             checkpoint = {
             'epoch': epoch,
+            #'model': self.model.state_dict(),
             'model': get_lora_weights(self.model),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
@@ -258,6 +261,9 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
 
     model = setup_model(model_config, training_config.use_lora,training_config.use_lora_layers)
+
+    #lora_state_dict = get_peft_model_state_dict(model)
+    #trainable_params = model.get_trainable_parameters()
     
     if save_dir:
         training_config.save_dir = save_dir
@@ -295,12 +301,11 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     if not training_config.use_lora:
         print("Freezing most of model except few layers!")
         freeze_model_layers(model)
-        print_frozen_status(model)
     
     else:
-         assert verify_only_lora_trainable(model), "Non-LoRA parameters are trainable!"
-        
-    
+         print( f"Is only Lora trainable?  {verify_only_lora_trainable(model)} ")
+
+    print_frozen_status(model)   
     # Training loop
     for epoch in range(training_config.num_epochs):
         if epoch % training_config.visualization_frequency == 0:

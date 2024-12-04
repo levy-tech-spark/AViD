@@ -32,7 +32,7 @@ def process_images(
         model,
         text_prompt,
         data_config,
-        box_threshold=0.35,
+        box_threshold=0.30,
         text_threshold=0.20
 ):
     visualizer = GroundingDINOVisualizer(save_dir="visualizations")

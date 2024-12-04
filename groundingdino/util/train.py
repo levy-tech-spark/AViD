@@ -15,7 +15,7 @@ from groundingdino.models import build_model
 from groundingdino.util.misc import clean_state_dict
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import get_phrases_from_posmap
-from groundingdino.util.lora import add_lora_to_layers, add_lora_to_model
+from groundingdino.util.lora import add_lora_to_layers2, add_lora_to_model
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
@@ -43,7 +43,7 @@ def load_model(model_config_path: str, model_checkpoint_path: str, device: str =
     model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
     if use_lora and use_lora_layers:
         print(f"Added Lora to Layers!!")
-        add_lora_to_layers(model)
+        model=add_lora_to_layers2(model)
         print(f"Lora model is {model}")
     else:
         print(f"Added Lora to Model!!")

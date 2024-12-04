@@ -20,10 +20,8 @@ def get_lora_optimizer_params(model):
     # Get only LoRA trainable parameters for optimizer
     lora_params = []
     for name, param in model.named_parameters():
-        if 'lora_' in name and param.requires_grad:
+        if param.requires_grad:
             lora_params.append(param)
-    #params=sum(p.numel() for p in lora_params)
-    #print(params)
     return lora_params
 
 def load_lora_weights(model, weights_path):
@@ -216,3 +214,54 @@ def add_lora_to_layers(model, rank=32):
     print(f"\nLoRA parameters: {trainable_params:,} / {total_params:,} = {100 * trainable_params / total_params:.2f}%")
 
     return model
+
+
+
+def add_lora_to_layers2(model, rank=32):
+    """
+    Adds LoRA to complete Grounding DINO model using PEFT's functionality
+    """
+    from peft import LoraConfig, get_peft_model
+
+    config = LoraConfig(
+        r=rank,
+        lora_alpha=rank,
+        target_modules=[
+            # Decoder cross attention
+            "cross_attn.sampling_offsets",
+            "cross_attn.attention_weights", 
+            "cross_attn.value_proj",
+            "cross_attn.output_proj",
+            # Text cross attention
+            "ca_text.out_proj",
+            # Self attention 
+            "self_attn.out_proj",
+            # FFN
+            "linear1",
+            "linear2",
+            # Bbox prediction layers
+            "bbox_embed.0.layers.0",
+            "bbox_embed.0.layers.1",
+            # fearue map
+            "feat_map"
+        ],
+        modules_to_save=["bbox_embed.0.layers.2"],
+        bias="none",
+        inference_mode=False,
+    )
+
+    print("\nAll Model Layers:")
+    for name, module in model.named_modules():
+        if 'bbox' in name:
+            print(f"full path: {name}")
+    
+
+    print("Converting model to LoRA...")
+    model = get_peft_model(model, config)
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"LoRA parameters: {trainable_params:,} / {total_params:,} = {100 * trainable_params / total_params:.2f}%")
+
+    return model
+
