@@ -40,7 +40,7 @@ def process_images(
     for img in os.listdir(data_config.val_dir):
         image_path=os.path.join(data_config.val_dir,img)
         image_source, image = load_image(image_path)
-        visualizer.visualize_image(model,image,text_prompt,image_source,img)
+        visualizer.visualize_image(model,image,text_prompt,image_source,img,box_th=box_threshold,txt_th=text_threshold)
 
         #boxes, logits, phrases = predict(
         #    model=model,

@@ -309,7 +309,7 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     # Training loop
     for epoch in range(training_config.num_epochs):
         if epoch % training_config.visualization_frequency == 0:
-            visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch)
+            visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch,box_th=0.3, txt_th= 0.2)
         
         epoch_losses = defaultdict(list)
         for batch_idx, batch in enumerate(train_loader):

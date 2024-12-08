@@ -146,7 +146,7 @@ class GroundingDINOVisualizer:
         return phrases
     
 
-    def visualize_epoch(self, model, val_loader, epoch, prepare_data):
+    def visualize_epoch(self, model, val_loader, epoch, prepare_data, box_th=0.3,txt_th=0.2):
         model.eval()
         save_dir = os.path.join(self.save_dir, f'epoch_{epoch}')
         os.makedirs(save_dir, exist_ok=True)
@@ -166,14 +166,14 @@ class GroundingDINOVisualizer:
                 
                 # Filter confident predictions
                 scores = pred_logits.max(dim=1)[0]
-                mask = scores > 0.3  # Box threshold
+                mask = scores > box_th  #The least threshold which is required for object to be useful
 
                 filtered_boxes = pred_boxes[mask]
                 filtered_logits = pred_logits[mask]
 
                 # Get phrase predictions
                 tokenized = outputs['tokenized']
-                phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer)
+                phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer, text_threshold=txt_th)
 
                 # Draw predictions
                 if len(filtered_boxes):
@@ -202,7 +202,7 @@ class GroundingDINOVisualizer:
                     break
 
 
-    def visualize_image(self, model, image, caption,image_source,fname,device="cuda"):
+    def visualize_image(self, model, image, caption,image_source,fname,device="cuda", box_th=0.3,txt_th=0.2):
         model.eval()
         save_dir = os.path.join(self.save_dir, f'inference')
         os.makedirs(save_dir, exist_ok=True)
@@ -222,18 +222,17 @@ class GroundingDINOVisualizer:
             pred_logits = outputs["pred_logits"][0].cpu().sigmoid()
             pred_boxes = outputs["pred_boxes"][0].cpu()
             
-            # Box threshold
-            th=0.3
             # Filter confident predictions
             scores = pred_logits.max(dim=1)[0]
-            mask = scores > th 
+            ## The least threshold which is required for object to be useful
+            mask = scores > box_th
 
             filtered_boxes = pred_boxes[mask]
             filtered_logits = pred_logits[mask]
 
             # Get phrase predictions
             tokenized = outputs['tokenized']
-            phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer)
+            phrases = self.extract_phrases(filtered_logits, tokenized, model.tokenizer,text_threshold=txt_th)
 
             # Draw predictions
             if len(filtered_boxes):
