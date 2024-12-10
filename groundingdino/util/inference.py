@@ -41,7 +41,7 @@ def load_weights(model:torch.nn.Module,checkpoint:dict):
         model.load_state_dict(clean_state_dict(checkpoint), strict=False)
 
 
-def load_model(model_config:ModelConfig, use_lora:bool= False, use_lora_layers:bool=True, device: str = "cuda",strict: bool =True):
+def load_model(model_config:ModelConfig, use_lora:bool= False, device: str = "cuda",strict: bool =True):
     args = SLConfig.fromfile(model_config.config_path)
     args.device = device
     model = build_model(args)
@@ -50,34 +50,14 @@ def load_model(model_config:ModelConfig, use_lora:bool= False, use_lora_layers:b
     base_ckpt = torch.load(model_config.weights_path, map_location="cpu")
     load_weights(model,base_ckpt)
     # BUild Lora model just like training model
-    if use_lora and use_lora_layers:
-        print(f"Added Lora to Layers!!")
-        model=add_lora_to_layers2(model)
+    if use_lora:
+        print(f"Adding Lora to Model!")
+        model=add_lora_to_model(model)
         lora_ckpt = torch.load(model_config.lora_weigths, map_location="cpu")
         load_weights(model,lora_ckpt)
         print(f"Lora model is {model}")
+        print("Merging LoRA weights with base model")
         model = model.merge_and_unload()
-        print("LoRA weights merged with base model")
-    return model
-    #else:
-    #    print(f"Added Lora to Model!!")
-    #    add_lora_to_model(model)
-    #    print(f"Lora model is {model}")
-
-    # Loading main weights if lora is not used these are the only one required
-    checkpoint = torch.load(model_config.weights_path, map_location="cpu")
-    print(f"Loading main model Weights!!")
-    load_weights(model,checkpoint)
-    if use_lora:
-        print(f"Loading Lora Weights!!")
-        checkpoint = torch.load(model_config.lora_weigths, map_location="cpu")
-        lora_keys = [k for k in model.state_dict().keys() if 'lora_' in k]
-        for key in checkpoint['model'].keys():
-            if key not in lora_keys:
-                raise ValueError(f"Unexpected key in LORA checkpoint: {key}")
-        load_weights(model,checkpoint)
-
-    model.eval()
     return model
 
 

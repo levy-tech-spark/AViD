@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from groundingdino.util.matchers import build_matcher
 from groundingdino.util.inference import GroundingDINOVisualizer
 from groundingdino.util.model_utils import freeze_model_layers, print_frozen_status
-from groundingdino.util.lora import get_lora_weights,get_lora_optimizer_params, verify_only_lora_trainable
+from groundingdino.util.lora import get_lora_optimizer_params, verify_only_lora_trainable
 from datetime import datetime
 import yaml
 from typing import Dict, Optional, Any
@@ -24,12 +24,11 @@ from peft import get_peft_model_state_dict
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
     
 
-def setup_model(model_config: ModelConfig, use_lora: bool=False, use_lora_layers:bool=True) -> torch.nn.Module:
+def setup_model(model_config: ModelConfig, use_lora: bool=False) -> torch.nn.Module:
     return load_model(
         model_config.config_path,
         model_config.weights_path,
         use_lora=use_lora,
-        use_lora_layers=use_lora_layers
     )
 
 def setup_data_loaders(config: DataConfig) -> tuple[DataLoader, DataLoader]:
@@ -233,8 +232,7 @@ class GroundingDINOTrainer:
             lora_state_dict = get_peft_model_state_dict(self.model)
             checkpoint = {
             'epoch': epoch,
-            #'model': self.model.state_dict(),
-            'model': get_lora_weights(self.model),
+            'model': lora_state_dict,
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'losses': losses,}
@@ -261,9 +259,6 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
 
     model = setup_model(model_config, training_config.use_lora,training_config.use_lora_layers)
-
-    #lora_state_dict = get_peft_model_state_dict(model)
-    #trainable_params = model.get_trainable_parameters()
     
     if save_dir:
         training_config.save_dir = save_dir

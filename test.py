@@ -63,5 +63,5 @@ if __name__ == "__main__":
     config_path="configs/test_config.yaml"
     text_prompt="shirt .bag .pants"
     data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
-    model = load_model(model_config,training_config.use_lora,training_config.use_lora_layers)
+    model = load_model(model_config,training_config.use_lora)
     process_images(model,text_prompt,data_config)

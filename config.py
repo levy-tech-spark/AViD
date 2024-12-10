@@ -45,7 +45,6 @@ class TrainingConfig:
     save_frequency: int = 100
     warmup_epochs: int = 5
     use_lora: bool = False
-    use_lora_layers: bool = True  # Weather to apply lora to only few layers or most of the model
     visualization_frequency: int = 5
 
     @classmethod
@@ -57,7 +56,6 @@ class TrainingConfig:
             save_frequency=int(data.get('save_frequency', 100)),
             warmup_epochs=int(data.get('warmup_epochs', 5)),
             use_lora=bool(data.get('use_lora', False)),
-            use_lora_layers=bool(data.get('use_lora_layers', True)),
             visualization_frequency=int(data.get('visualization_frequency', 5))
         )
 
