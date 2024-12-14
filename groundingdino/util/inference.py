@@ -19,7 +19,7 @@ from groundingdino.util.class_loss import FocalLoss
 import os
 from groundingdino.util.box_ops import box_cxcywh_to_xyxy
 from config import ModelConfig
-from groundingdino.util.lora import add_lora_to_layers,add_lora_to_layers2, add_lora_to_model
+from groundingdino.util.lora import add_lora_to_model
 
 # ----------------------------------------------------------------------------------------------------------------------
 # OLD API
@@ -33,33 +33,70 @@ def preprocess_caption(caption: str) -> str:
     return result + "."
 
 
-def load_weights(model:torch.nn.Module,checkpoint:dict):
+def load_weights(model:torch.nn.Module,checkpoint:dict,strict:bool=False):
     if "model" in checkpoint.keys():
-        model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
+        model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=strict)
     else:
-        # The state dict is the checkpoint
-        model.load_state_dict(clean_state_dict(checkpoint), strict=False)
+        model.load_state_dict(clean_state_dict(checkpoint), strict=strict)
 
 
-def load_model(model_config:ModelConfig, use_lora:bool= False, device: str = "cuda",strict: bool =True):
+def load_model(model_config, use_lora: bool = False, device: str = "cuda", strict: bool = False):
     args = SLConfig.fromfile(model_config.config_path)
     args.device = device
     model = build_model(args)
-
-    # Load base weights
-    base_ckpt = torch.load(model_config.weights_path, map_location="cpu")
-    load_weights(model,base_ckpt)
-    # BUild Lora model just like training model
+    
     if use_lora:
+        # Load base weights
+        base_ckpt = torch.load(model_config.weights_path, map_location="cpu")
+        load_weights(model, base_ckpt, strict=False)
         print(f"Adding Lora to Model!")
-        model=add_lora_to_model(model)
+        model = add_lora_to_model(model) # transforms the model to `PeftModel` object
         lora_ckpt = torch.load(model_config.lora_weigths, map_location="cpu")
-        load_weights(model,lora_ckpt)
-        print(f"Lora model is {model}")
+        # Rename LoRA checkpoint keys
+        print("Renaming LoRA checkpoint keys to match model structure")
+        lora_ckpt_state_dict = clean_state_dict(lora_ckpt["model"]) if "model" in lora_ckpt else clean_state_dict(lora_ckpt)
+        new_lora_ckpt_state_dict = {}
+        # Get modules_to_save from the model
+        modules_to_save = []
+        if hasattr(model, "peft_config") and "default" in model.peft_config:
+            modules_to_save = model.peft_config["default"].modules_to_save
+        # We have to rename the saved lora weights to the one in the lora model, kind of ugly mabe there is a better way    
+        for key, value in lora_ckpt_state_dict.items():
+            new_key = key.replace(".lora_A.weight", ".lora_A.default.weight").replace(".lora_B.weight", ".lora_B.default.weight")
+            # Handle modules_to_save
+            for module_name in modules_to_save:
+                if module_name in key:
+                    new_key = new_key.replace(".weight", ".original_module.weight").replace(".bias", ".original_module.bias")
+            new_lora_ckpt_state_dict[new_key] = value
+        
+        print("Checking if all lora checkpoint keys exist in the model.")
+        model_state_dict = model.state_dict()
+        
+        missing_keys = []
+        for key in new_lora_ckpt_state_dict.keys():
+            if key not in model_state_dict:
+                missing_keys.append(key)
+
+        if len(missing_keys) > 0:
+            print(f"ERROR: The following LoRA checkpoint keys are missing in the model state dict:")
+            for missing_key in missing_keys:
+                print(f" - {missing_key}")
+            raise Exception("Lora Checkpoint keys missing from model")
+        else:
+             print("All lora checkpoint keys exist in the model state dict!!")
+        
+        if "model" in lora_ckpt:
+            lora_ckpt["model"] = new_lora_ckpt_state_dict
+        else:
+            lora_ckpt = new_lora_ckpt_state_dict
+        load_weights(model, lora_ckpt, strict =False) 
         print("Merging LoRA weights with base model")
         model = model.merge_and_unload()
+    else:
+        base_ckpt = torch.load(model_config.weights_path, map_location="cpu")
+        load_weights(model, base_ckpt, strict=strict)
+        
     return model
-
 
 def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
     transform = T.Compose(

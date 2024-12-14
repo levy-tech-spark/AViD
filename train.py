@@ -230,6 +230,7 @@ class GroundingDINOTrainer:
         """Save checkpoint with EMA and scheduler state""" 
         if use_lora:
             lora_state_dict = get_peft_model_state_dict(self.model)
+            print(lora_state_dict)
             checkpoint = {
             'epoch': epoch,
             'model': lora_state_dict,
@@ -258,7 +259,7 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
 
     data_config, model_config, training_config = ConfigurationManager.load_config(config_path)
 
-    model = setup_model(model_config, training_config.use_lora,training_config.use_lora_layers)
+    model = setup_model(model_config, training_config.use_lora)
     
     if save_dir:
         training_config.save_dir = save_dir
@@ -282,15 +283,6 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
 
     steps_per_epoch = len(train_loader.dataset) // data_config.batch_size
     
-    trainer = GroundingDINOTrainer(
-        model,
-        num_steps_per_epoch=steps_per_epoch,
-        num_epochs=training_config.num_epochs,
-        warmup_epochs=training_config.warmup_epochs,
-        learning_rate=training_config.learning_rate,
-        use_lora=training_config.use_lora
-    )
-    
     visualizer = GroundingDINOVisualizer(save_dir=save_dir)
     
     if not training_config.use_lora:
@@ -300,7 +292,16 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
     else:
          print( f"Is only Lora trainable?  {verify_only_lora_trainable(model)} ")
 
-    print_frozen_status(model)   
+    print_frozen_status(model)
+
+    trainer = GroundingDINOTrainer(
+        model,
+        num_steps_per_epoch=steps_per_epoch,
+        num_epochs=training_config.num_epochs,
+        warmup_epochs=training_config.warmup_epochs,
+        learning_rate=training_config.learning_rate,
+        use_lora=training_config.use_lora
+    )   
     # Training loop
     for epoch in range(training_config.num_epochs):
         if epoch % training_config.visualization_frequency == 0:

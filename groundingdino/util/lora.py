@@ -51,7 +51,7 @@ def verify_only_lora_trainable(model):
     print(f"Trainable LoRA parameters: {trainable_lora:,}")
     return True
 
-def add_lora_to_model(model, rank=32):
+def add_lora_to_model(model, rank=32, inference=False):
     """
     Adds LoRA to complete Grounding DINO model using PEFT's functionality"""
 
@@ -79,7 +79,7 @@ def add_lora_to_model(model, rank=32):
         ],
         modules_to_save=["bbox_embed.0.layers.2"],
         bias="none",
-        inference_mode=False,
+        inference_mode=inference,
     )
     #print("\nAll Model Layers:")
     #for name, module in model.named_modules():
