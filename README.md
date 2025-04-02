@@ -136,7 +136,7 @@ python demo/gradio_app.py --share
 **Current Priorities:**
 
 - [x] Add LoRA for efficient fine-tuning
-- [ ] Add comprehensive model evaluation metrics
+- [x] Add comprehensive model evaluation metrics
 - [ ] Implement techniques to prevent catastrophic forgetting
 - [ ] Add auxiliary losses as described in the original paper
 - [ ] Quantization support
@@ -150,6 +150,22 @@ python demo/gradio_app.py --share
 3. Commit changes (`git commit -m 'Add amazing feature'`)
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open Pull Request
+
+## Model Evaluation 📊
+
+AViD includes a comprehensive evaluation framework for measuring detection performance:
+
+- **Metrics**: mAP, Precision, Recall, F1 Score with customizable IoU thresholds
+- **Visualizations**: Automated generation of prediction vs. ground truth visualizations
+- **Integration**: Evaluate during training or as a standalone process
+- **Reporting**: Detailed metrics reports with per-class breakdown
+
+For detailed information on using the evaluation tools, see [EVALUATION.md](EVALUATION.md).
+
+```bash
+# Run standalone evaluation
+python evaluate.py --config configs/evaluation_config.yaml
+```
 
 ## License 📜
 
