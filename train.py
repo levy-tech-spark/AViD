@@ -19,6 +19,9 @@ from groundingdino.datasets.dataset import GroundingDINODataset
 from groundingdino.util.losses import SetCriterion
 from config import ConfigurationManager, DataConfig, ModelConfig
 from peft import get_peft_model_state_dict
+from groundingdino.util.evaluation import evaluate_model, print_evaluation_report, visualize_predictions
+import json
+import cv2
 
 # Ignore tokenizer warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -303,37 +306,162 @@ def train(config_path: str, save_dir: Optional[str] = None) -> None:
         use_lora=training_config.use_lora
     )   
     # Training loop
+    print(f"Starting training for {training_config.num_epochs} epochs")
+    
+    # Track best validation metrics
+    best_metrics = {
+        'loss': float('inf'),
+        'mean_ap': 0.0
+    }
+    
+    # Save training history
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'evaluations': {}
+    }
+    
     for epoch in range(training_config.num_epochs):
-        if epoch % training_config.visualization_frequency == 0:
-            visualizer.visualize_epoch(model, val_loader, epoch, trainer.prepare_batch,box_th=0.3, txt_th= 0.2)
+        train_losses = defaultdict(float)
         
-        epoch_losses = defaultdict(list)
-        for batch_idx, batch in enumerate(train_loader):
-            losses = trainer.train_step(batch)
+        # Train epoch
+        print(f"Epoch {epoch+1}/{training_config.num_epochs}")
+        for i, batch in enumerate(train_loader):
+            loss_dict = trainer.train_step(batch)
             
-            # Record losses
-            for k, v in losses.items():
-                epoch_losses[k].append(v)
-            
-            if batch_idx % 5 == 0:
-                loss_str = ", ".join(f"{k}: {v:.4f}" for k, v in losses.items())
-                print(f"Epoch {epoch+1}/{training_config.num_epochs}, "
-                      f"Batch {batch_idx}/{len(train_loader)}, {loss_str}")
-                print(f"Learning rate: {trainer.optimizer.param_groups[0]['lr']:.6f}")
-
-        avg_losses = {k: sum(v)/len(v) for k, v in epoch_losses.items()}
-        print(f"Epoch {epoch+1} complete. Average losses:",
-              ", ".join(f"{k}: {v:.4f}" for k, v in avg_losses.items()))
+            # Log losses
+            for k, v in loss_dict.items():
+                train_losses[k] += v
+                
+            if i % 10 == 0:
+                print(f"Step {i}/{len(train_loader)}: Loss = {loss_dict['total_loss']:.4f}")
+        
+        # Average training losses
+        avg_train_losses = {k: v / len(train_loader) for k, v in train_losses.items()}
+        
+        # Validate
+        val_losses = trainer.validate(val_loader)
+        
+        # Print epoch summary
+        print(f"Epoch {epoch+1} summary:")
+        print(f"  Train loss: {avg_train_losses['total_loss']:.4f}")
+        print(f"  Val loss: {val_losses['total_loss']:.4f}")
+        
+        # Update history
+        history['train_loss'].append(avg_train_losses['total_loss'])
+        history['val_loss'].append(val_losses['total_loss'])
         
         # Save checkpoint
         if (epoch + 1) % training_config.save_frequency == 0:
-            trainer.save_checkpoint(
-                os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'),
-                epoch,
-                avg_losses,
-                use_lora=training_config.use_lora
+            checkpoint_path = os.path.join(
+                training_config.save_dir, f"checkpoint_epoch_{epoch+1}.pth"
             )
-
+            trainer.save_checkpoint(checkpoint_path, epoch + 1, val_losses, training_config.use_lora)
+            print(f"Saved checkpoint to {checkpoint_path}")
+        
+        # Save model if it's the best so far
+        if val_losses['total_loss'] < best_metrics['loss']:
+            best_metrics['loss'] = val_losses['total_loss']
+            best_checkpoint_path = os.path.join(
+                training_config.save_dir, "best_model.pth"
+            )
+            trainer.save_checkpoint(best_checkpoint_path, epoch + 1, val_losses, training_config.use_lora)
+            print(f"Saved best model to {best_checkpoint_path}")
+        
+        # Visualize predictions periodically
+        if (epoch + 1) % training_config.visualization_frequency == 0:
+            print("Generating visualizations...")
+            visualizer.visualize_epoch(
+                model=trainer.model, 
+                val_loader=val_loader, 
+                epoch=epoch+1, 
+                prepare_data=trainer.prepare_batch
+            )
+        
+        # Evaluate model using our evaluation metrics
+        if (training_config.evaluate_during_training and 
+            training_config.evaluation and 
+            (epoch + 1) % training_config.evaluation_frequency == 0):
             
+            print("Evaluating model...")
+            # Prepare batch function
+            prepare_batch_fn = lambda batch: trainer.prepare_batch(batch)
+            
+            # Run evaluation
+            evaluation_metrics = evaluate_model(
+                model=trainer.model,
+                data_loader=val_loader,
+                prepare_batch_fn=prepare_batch_fn
+            )
+            
+            # Print evaluation report
+            print_evaluation_report(evaluation_metrics)
+            
+            # Store evaluation metrics in history
+            history['evaluations'][epoch + 1] = evaluation_metrics
+            
+            # Save evaluation metrics to a file
+            eval_metrics_file = os.path.join(training_config.evaluation.metrics_output_dir, f"evaluation_epoch_{epoch+1}.json")
+            with open(eval_metrics_file, 'w') as f:
+                json.dump(evaluation_metrics, f, indent=2)
+                
+            # Update best metrics if this is the best model by mAP
+            if evaluation_metrics.get('mean_ap', 0) > best_metrics['mean_ap']:
+                best_metrics['mean_ap'] = evaluation_metrics.get('mean_ap', 0)
+                best_map_path = os.path.join(
+                    training_config.save_dir, "best_map_model.pth"
+                )
+                trainer.save_checkpoint(best_map_path, epoch + 1, val_losses, training_config.use_lora)
+                print(f"Saved model with best mAP ({best_metrics['mean_ap']:.4f}) to {best_map_path}")
+                
+            # Generate visualizations if enabled
+            if training_config.evaluation.generate_visualizations:
+                print("Generating evaluation visualizations...")
+                results = visualize_predictions(
+                    model=trainer.model,
+                    data_loader=val_loader,
+                    prepare_batch_fn=prepare_batch_fn,
+                    num_samples=training_config.evaluation.num_visualization_samples,
+                    score_threshold=training_config.evaluation.score_threshold
+                )
+                
+                # Save visualizations
+                if results:
+                    vis_eval_dir = os.path.join(training_config.evaluation.metrics_output_dir, f"visualizations_epoch_{epoch+1}")
+                    os.makedirs(vis_eval_dir, exist_ok=True)
+                    
+                    for i, result in enumerate(results):
+                        img = result['image'].copy()
+                        pred_boxes = result['pred_boxes']
+                        pred_scores = result['pred_scores']
+                        gt_boxes = result['gt_boxes']
+                        
+                        # Draw ground truth in green
+                        for box in gt_boxes:
+                            x1, y1, x2, y2 = box.astype(int)
+                            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        
+                        # Draw predictions in red
+                        for j, (box, score) in enumerate(zip(pred_boxes, pred_scores)):
+                            x1, y1, x2, y2 = box.astype(int)
+                            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                            cv2.putText(img, f"{score:.2f}", (x1, y1 - 5),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        
+                        # Save image
+                        cv2.imwrite(
+                            os.path.join(vis_eval_dir, f"sample_{i}.jpg"), 
+                            cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                        )
+    
+    # Save training history
+    history_path = os.path.join(training_config.save_dir, "training_history.json")
+    with open(history_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    
+    print("Training complete!")
+    print(f"Best validation loss: {best_metrics['loss']:.4f}")
+    print(f"Best validation mAP: {best_metrics['mean_ap']:.4f}")
+
 if __name__ == "__main__":
     train('configs/train_config.yaml')
