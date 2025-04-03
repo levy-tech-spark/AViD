@@ -1,0 +1,34 @@
+data:
+  train_dir: "path/to/train/images"
+  train_ann: "path/to/train/annotations.json"
+  val_dir: "path/to/val/images"
+  val_ann: "path/to/val/annotations.json"
+  num_workers: 4
+  batch_size: 2
+
+model:
+  config_path: "groundingdino/config/GroundingDINO_SwinT_OGC.py"
+  weights_path: "weights/groundingdino_swint_ogc.pth"
+  lora_weights: null  # Optional LoRA weights path
+
+training:
+  num_epochs: 100
+  learning_rate: 2e-4
+  save_dir: "results/model_run_1"
+  save_frequency: 10
+  warmup_epochs: 5
+  use_lora: false
+  visualization_frequency: 10
+  
+  # Evaluation settings
+  evaluate_during_training: true
+  evaluation_frequency: 5  # Evaluate every 5 epochs
+  
+  # Detailed evaluation configuration
+  evaluation:
+    iou_thresholds: [0.5, 0.75]  # IoU thresholds for evaluation
+    score_threshold: 0.3  # Confidence score threshold
+    max_detections: 100  # Maximum detections per image
+    metrics_output_dir: "evaluation_results"  # Directory to save evaluation results
+    generate_visualizations: true  # Generate visualization images
+    num_visualization_samples: 10  # Number of samples to visualize 
