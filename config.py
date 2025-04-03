@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import yaml
 
 
@@ -38,6 +38,33 @@ class ModelConfig:
         )
 
 @dataclass
+class EvaluationConfig:
+    iou_thresholds: List[float] = None
+    score_threshold: float = 0.25
+    max_detections: int = 100
+    metrics_output_dir: str = 'evaluation_results'
+    generate_visualizations: bool = True
+    num_visualization_samples: int = 10
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationConfig':
+        if data is None:
+            return cls()
+            
+        iou_thresholds = data.get('iou_thresholds', [0.5, 0.75])
+        if isinstance(iou_thresholds, str):
+            iou_thresholds = [float(x.strip()) for x in iou_thresholds.split(',')]
+            
+        return cls(
+            iou_thresholds=iou_thresholds,
+            score_threshold=float(data.get('score_threshold', 0.25)),
+            max_detections=int(data.get('max_detections', 100)),
+            metrics_output_dir=str(data.get('metrics_output_dir', 'evaluation_results')),
+            generate_visualizations=bool(data.get('generate_visualizations', True)),
+            num_visualization_samples=int(data.get('num_visualization_samples', 10))
+        )
+
+@dataclass
 class TrainingConfig:
     num_epochs: int = 1000
     learning_rate: float = 1e-3
@@ -46,9 +73,14 @@ class TrainingConfig:
     warmup_epochs: int = 5
     use_lora: bool = False
     visualization_frequency: int = 5
+    evaluate_during_training: bool = True
+    evaluation_frequency: int = 10
+    evaluation: EvaluationConfig = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TrainingConfig':
+        evaluation_config = EvaluationConfig.from_dict(data.get('evaluation', None))
+        
         return cls(
             num_epochs=int(data.get('num_epochs', 1000)),
             learning_rate=float(data.get('learning_rate', 1e-3)),
@@ -56,7 +88,10 @@ class TrainingConfig:
             save_frequency=int(data.get('save_frequency', 100)),
             warmup_epochs=int(data.get('warmup_epochs', 5)),
             use_lora=bool(data.get('use_lora', False)),
-            visualization_frequency=int(data.get('visualization_frequency', 5))
+            visualization_frequency=int(data.get('visualization_frequency', 5)),
+            evaluate_during_training=bool(data.get('evaluate_during_training', True)),
+            evaluation_frequency=int(data.get('evaluation_frequency', 10)),
+            evaluation=evaluation_config
         )
 
 class ConfigurationManager:
