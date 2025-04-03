@@ -11,4 +11,8 @@ pycocotools
 ema_pytorch
 scipy
 peft
-setuptools==65.5.1 
+setuptools==65.5.1
+matplotlib
+seaborn
+tqdm
+pillow 
